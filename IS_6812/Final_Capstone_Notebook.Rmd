@@ -1,0 +1,978 @@
+---
+title: "MSBA Capstone - Home Credit"
+author: "Shane Nisley, Aiden Coutin, Jacob Jarrard, Gustav Vøllo"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    theme: journal
+    toc: true
+    
+---
+
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(message=FALSE, warning=FALSE)
+```
+
+
+
+# I. Summary & Explanations 
+
+## Business Problem Statement 
+
+>  In the face of global financial disparities, Home Credit identified a critical need to extend credit services to the unbanked and underbanked populations—a demographic traditionally perceived as high-risk due to the absence of conventional credit histories. Our strategic response harnesses predictive analytics to refine our risk evaluation criteria, balancing risk with the imperative to offer fair credit access. This effort aligns with our corporate objective to shrink loan default rates while extending credit to those historically sidelined by the financial system.
+
+>  Our latest data-driven model advances this agenda to an inflection point in our business processes. Building on extensive exploratory data analysis, after conducting a series of different machine learning algorithms, we applied a gradient boosting framework that utilizes identified predictive indicators to create a model that is likely the most accurate algorithm available to our team. The model's efficacy, evidenced by its empirical foundation, demonstrates not only fidelity to statistical rigor but also to our mission of financial inclusivity.
+
+>  The practical implications of deploying our predictive model are significant. We distilled over 356,000 client records into actionable intelligence, categorizing loan applicants with much precision. This capability promises to minimize default exposure and, critically, to dismantle barriers to credit for viable applicants devoid of traditional financial footprints. The model is a cornerstone in our strategy to achieve a sustainable default rate reduction, reflecting our concerted effort to engender economic resilience among emerging market demographics.
+
+>  In presenting this model, we affirm our dedication to combining analytical excellence with a progressive credit provisioning philosophy. As we move forward, our focus remains on the dual objectives of diminishing financial vulnerability for the unbanked and underbanked and enhancing Home Credit's role as an enabler of economic opportunity. Our commitment to this two-prong mandate is a blueprint for responsible expansion in the dynamic consumer finance landscape.
+
+## Bottom Line:
+
+> Our team ultimately employed the XGBoost algorithm for its accuracy in predicting outcomes, given its effectiveness in handling large datasets and constructing advanced predictive models that sequentially learn from prior mistakes to improve performace. Our model proved its mettle by generating an accuracy of over .92 (difficult given the skewed target variable) and a Kaggle score above 0.76 (XGBoosted at 2000 rounds.) However, its success uncovers a real conversation about how we can minimize defaults and maximize loan approvals, and how many defaults Home Credit can ultimately afford. 
+
+> Despite its accuracy, the model, without adjustments for the minority class weight, predicted defaults significantly less than the actual 8% default rate in our training data (true positives and false positives.) That is to say, no model we employed performed well out of the box when it came to the true positive rate, also known as sensitivity or recall. (Or one could argue that the true positives we identified are very likely to default!) This mismatch suggests that our pursuit of precision also needs to maximize a more correct representation of default cases to avoid excluding genuine borrowers or including probable defaults. In the end, all models pointed to a trade-off between model precision and the representation of minority class instances. Though difficult to solve, this knowledge powered our collective way forward and stands out as our mid-term objective to solve for this project.  
+
+> Above all, our analysis pinpointed the critical variables within our dataset—and generated additional ones from supplementary data—that most accurately forecast whether a customer will default or repay a loan. Armed with this knowledge, we can prioritize collecting the most predictive data for loan processing moving forward in the application process and disregard customer information that offers no predictive value for loan outcomes.  
+
+
+## Data Cleaning & Preparation Process
+
+> Each member of the team set out to explore the data individually.  Beyond exploratory data analysis, each member of the team identified and wrestled with slightly different variables within the data set. Some of us identified different opportunities to enhance our outcomes with individual feature selection and engineering. For the most part we collectively came to the same conclusion on which variables to include in our final model. The following data cleaning process reflects our team's concensus: 
+
+> Upon examining the target variable, we discovered a significant class imbalance; the majority class constituted approximately 91% of the data. This indicated potential challenges in model training, as models could be predisposed to favor the majority class, possibly impacting the predictive performance for the minority class.
+
+> We thoroughly analyzed the dataset for outliers, necessary transformations, and missing values, using the data dictionary provided by Home Credit to guide our understanding of the variables. We scrutinized individual variables, such as loan types (cash vs. revolving loans), and implemented the following cleaning actions:
+
+>   * Transformed negative values to positives to correct skewness and distribution.
+>   * Eliminated unrealistic outliers, such as employment days exceeding a typical human lifespan, substituting them with median values.
+>   * Imposed a cap on total income at the 99th percentile, with additional caps applied judiciously based on realistic assessments.
+
+> Our focus then shifted to identifying zero and near-zero variance predictors, which are often uninformative for models. We eliminated predictors with minimal variance and substantial missing data. Subsequently, we engaged in feature engineering, creating new variables we hypothesized would enhance model performance. Feature importance was evaluated using Random Forest models, allowing us to discard non-contributory features. Notably, financial ratios emerged as significant predictors.
+
+>  Imputation was our concluding step, deliberately postponed to address only the variables retained for our final model. Initially considering the MICE package for its real-world applicability, we encountered computational limitations. Consequently, we opted for simpler imputation methods. Variables with a near-normal distribution were imputed with the mean to preserve central tendency, while others were imputed with the median to mitigate the influence of extreme values. Finally, we analyzed the final dataset, ensuring maintenance of original spreads and distributions, variable importance, and completeness
+
+
+
+
+## Group Modeling Process
+
+> In the development of our predictive models, our team evaluated a variety of algorithmic approaches. We initially considered five distinct models: linear regression, logistical regression, regression trees (using the 'rpart' package), Naïve Bayes, and a classification tree. In most cases we attempted to apply the same set of features across all models.
+
+> Our group utilized individual members' EDA and independent data cleaning and pre-processing techniques for use in our experimental models. We ultimately converged on one data set for use in our final model (process documented in section II below.)
+
+> The performance evaluation metrics employed included Area Under the Curve (AUC), confusion matrices, and Kaggle competition scores. These metrics guided us to the model exhibiting the best predictive power. In an attempt to refine our models further, we experimented with feature selection, using the most predictive variables. At the end of the day, no other model yielded improved results over the use of the 'clean8' feature set (used in the final model below.)
+
+> Hyperparameter optimization was conducted specifically for the classification tree model. The focus of this optimization was to determine an optimal count of leaf nodes that balanced model complexity and predictive power, aiming to prevent overfitting. The results of this model were used in feature selection and feature engineering.
+
+> Collectively, our team employed upwards of six different machine learning algorithms. As noted, we focused on supervised learning algorithms that are considered "white box," due to their interpretability, before finalizing our decision to use a gradient boosted model. Despite the individualized data cleansing approaches taken by each team member, some of which were omitted here for conciseness, the results varied, providing both unexpected insights and amusing anecdotes.
+
+> One of the main obstacles we faced was inconsistent computational resources. The large volume of data presented a significant challenge, particularly when attempting to deploy an Artificial Neural Network (ANN) model. To mitigate this, we considered scaling down the feature set to the most essential elements, but we were ultimately unable to proceed with ANN modeling due to the limitations of our computing power.
+
+> The following data frame shows our groups summary statsitics as we tried various models with different degrees of success:  
+
+```{r echo=FALSE, results='asis'}
+library(knitr)
+library(kableExtra)
+
+# Define CSS for just this chunk
+cat("
+<style>
+.custom-table {
+  font-family: Arial, sans-serif;
+}
+</style>
+")
+
+# Everyones Stats and Models input here...
+model_stats <- data.frame(
+  Model = character(),
+  True_Negatives = integer(),
+  False_Positives = integer(),
+  False_Negatives = integer(),
+  True_Positives = integer(),
+  Accuracy = numeric(),
+  Sensitivity = numeric(),
+  Specificity = numeric(),
+  AUC = numeric(), # AUC
+  Kaggle_Score = numeric(), # Kaggle Score values later
+  stringsAsFactors = FALSE # To keep text columns as character type
+)
+
+# Add Your Models
+model_stats[nrow(model_stats) + 1, ] <- list(
+  Model = "Linear Regression (Testing)",
+  True_Negatives = 56544,
+  False_Positives = 4931,
+  False_Negatives = 11,
+  True_Positives = 15,
+  Accuracy = 0.9196, # Provided model accuracy
+  Sensitivity = 0.999805, # Also known as the true positive rate
+  Specificity = 0.003033, # Also known as the true negative rate
+  AUC = 0.7482, #  AUC value
+  Kaggle_Score = .74 # Kaggle
+)
+
+# Log Regression
+model_stats[nrow(model_stats) + 1, ] <- c(
+  "Logistic Regression (Training)",
+  282642, # True_Negatives
+  24790,  # False_Positives
+  44,     # False_Negatives
+  35,     # True_Positives
+  0.9192, # Accuracy
+  0.99984, # Sensitivity
+  0.00141, # Specificity
+  0.7125945, # AUC
+  0.70     # Kaggle Score
+)
+
+model_stats[nrow(model_stats) + 1, ] <- list(
+  Model = "XGBoost model #1 (Training)",
+  True_Negatives = 282472,
+  False_Positives = 24304,
+  False_Negatives = 214,
+  True_Positives = 521,
+  Accuracy = 0.9203,
+  Sensitivity = 0.99924,
+  Specificity = 0.02099,
+  AUC = 0.78, # Replace with actual AUC for XGBoost model #1
+  Kaggle_Score = .739 # Replace with actual Kaggle Score for XGBoost model #1
+)
+
+# Adding XGBoost with weighted minority class
+model_stats[nrow(model_stats) + 1, ] <- list(
+  Model = "XGBoost model #2 Weighted Minority (Training)",
+  True_Negatives = 200915,
+  False_Positives = 81771,
+  False_Negatives = 7238,
+  True_Positives = 17587,
+  Accuracy = 0.7106,
+  Sensitivity = 0.7107,
+  Specificity = 0.7096,
+  AUC = 0.786, 
+  Kaggle_Score = .733 
+)
+
+model_stats[nrow(model_stats) + 1, ] <- list(
+  Model = "XGBoost model #3 FINAL MODEL (Testing)",
+  True_Negatives = 42345,
+  False_Positives = 3589,
+  False_Negatives = 91,
+  True_Positives = 101,
+  Accuracy = 0.9202,
+  Sensitivity = 0.99786,
+  Specificity = 0.02737,
+  AUC = 0.786, 
+  Kaggle_Score = 0.7483 
+)
+
+# Print the data frame
+kable(model_stats, format = "html", table.attr='class="custom-table"', caption = "Group Sample Models") %>%
+  kable_styling()
+
+```
+
+
+## Group Modeling Interpretations
+
+> Given our combined efforts and the concensus of the team, the singly most important element to improve our models was data processing, feature engineering, and imputing the appropriate values for missing data. In short, we had to make the best data possible. With less specific data pre-processing we achieved some measure of success with our various models, but we simply could not be confident in our final model until we agreed on how the data needed to be molded.  This took an inordinate amount of collective time and learning along the way iteratively to have a model worth sharing. There are many black box methods that can overcome bad data to a degree, but they simply can not do as good as they should without deep domain knowledge and specific human insight skilfully manipulating the features variable related to each customer. There is no way, particularly at the current time, that generative AI or other automated ML assistance can do feature engineering like a human can, especially when the data is as unweildy as that provided. 
+
+
+> Second to EDA, pre-processing, and feature engineering, we all agreed that our attempts with Extreme Gradient Boosting was clearly the best choice, but we would not have been prepared to employ it without first drawing on the clear and helpful output of the "white box" methods, such as linear and logistical regression.  We lament leaving a lot of work on the cutting room floor, but note that what follows proved to be our groups best effort. 
+
+
+# II. XGBOOST - Final Model Selection 
+
+
+
+## Exploring Target Variable Data
+
+
+```{r, message=FALSE, warning=FALSE}
+# Libraries
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, skimr, GGally, plotly, viridis, 
+               caret, DT, data.table, lightgbm, readr, e1071, ranger,
+               parallel, mice, corrplot, ggplot2, xgboost, pROC, knitr, kableExtra )
+
+#Data
+test_data <- read.csv("application_test.csv")
+train_data <- read.csv("application_train.csv")
+bureau <- read.csv("bureau.csv")
+b_balance <- read.csv("bureau_balance.csv")
+prev <- read.csv("previous_application.csv")
+
+
+```
+
+```{r}
+
+## Show table of target variable
+         
+table(train_data$TARGET)
+
+## Majority Class
+(majority_class <- which.max(table(train_data$TARGET)))
+
+## Baseline accuracy
+(majorityPerc <- sum(train_data$TARGET == 0) / nrow(train_data))
+
+# The data is unbalanced. We would achieve an accuracy of about 92% if we just assumed that nobody defaults on their loan. 
+
+```
+
+
+
+## Informed EDA & Outlier Adjustment
+
+```{r}
+## summary of data
+#summary(train_data)
+
+# Cash loans and Revolving loans
+table(train_data$NAME_CONTRACT_TYPE)
+
+
+## use skim to look over the data and get a feel for number of observations, range, and missing/ unique values
+# train_data %>% skim() %>% kable() # Leave this out; can be included when required 
+
+## My first step of cleaning the data is to remove columns that have less than 60% of their data
+
+# Calculate the proportion of missing values for each column
+missing_props <- map_dbl(train_data, ~mean(is.na(.)))
+
+# Filter out columns with more than 60% missing values
+clean1 <- train_data %>% select(which(missing_props <= 0.6))
+
+# using skim on clean1
+#clean1 %>% skim() %>% kable()
+
+# factoring categorical variables
+clean2 <- clean1
+
+clean2[] <- lapply(clean1, function(x) 
+  if (is.character(x)) factor(x) else x)
+
+#skim on clean2
+# clean2 %>% skim() %>% kable() #leaving out unless required for demo
+
+## Noticed the negative values for days, changing those rows to absolute values
+
+
+# Identify columns with any negative values and create clean3
+clean3 <- clean2 %>%
+  mutate(
+    DAYS_BIRTH = ifelse(DAYS_BIRTH < 0, abs(DAYS_BIRTH), DAYS_BIRTH),
+    DAYS_EMPLOYED = ifelse(DAYS_EMPLOYED < 0, abs(DAYS_EMPLOYED), DAYS_EMPLOYED),
+    DAYS_REGISTRATION = ifelse(DAYS_REGISTRATION < 0, abs(DAYS_REGISTRATION), DAYS_REGISTRATION),
+    DAYS_ID_PUBLISH = ifelse(DAYS_ID_PUBLISH < 0, abs(DAYS_ID_PUBLISH), DAYS_ID_PUBLISH),
+    DAYS_LAST_PHONE_CHANGE = ifelse(DAYS_LAST_PHONE_CHANGE < 0, abs(DAYS_LAST_PHONE_CHANGE), DAYS_LAST_PHONE_CHANGE))
+
+## skim on clean3
+#clean3 %>% skim() %>% kable()
+
+# summary of clean3 to see where to go next
+
+#summary(clean3)
+
+# dealing with outliers
+
+clean4 <- clean3 %>%
+  
+  # 1. Capping AMT_INCOME_TOTAL at the 99th percentile
+  mutate(AMT_INCOME_TOTAL = ifelse(AMT_INCOME_TOTAL > quantile(AMT_INCOME_TOTAL, 0.99, na.rm = TRUE), 
+                                   quantile(AMT_INCOME_TOTAL, 0.99, na.rm = TRUE), 
+                                   AMT_INCOME_TOTAL)) %>%
+  
+  # 2. Replacing impossible DAYS_EMPLOYED value with the median
+  mutate(DAYS_EMPLOYED = ifelse(DAYS_EMPLOYED == 365243, 
+                                median(DAYS_EMPLOYED[DAYS_EMPLOYED != 365243], na.rm = TRUE), 
+                                DAYS_EMPLOYED)) %>%
+  
+  # 3. Capping CNT_CHILDREN at 5 
+  mutate(CNT_CHILDREN = ifelse(CNT_CHILDREN > 5, 5, CNT_CHILDREN)) %>%
+  
+  # 4. Capping AMT_REQ_CREDIT_BUREAU_QRT at the 95th percentile
+  mutate(AMT_REQ_CREDIT_BUREAU_QRT = ifelse(AMT_REQ_CREDIT_BUREAU_QRT > quantile(AMT_REQ_CREDIT_BUREAU_QRT, 0.95, na.rm = TRUE),
+                                            quantile(AMT_REQ_CREDIT_BUREAU_QRT, 0.95, na.rm = TRUE),
+                                            AMT_REQ_CREDIT_BUREAU_QRT)) %>%
+  
+  # 5. Capping REGION_POPULATION_RELATIVE at the 99th percentile
+  mutate(REGION_POPULATION_RELATIVE = ifelse(REGION_POPULATION_RELATIVE > quantile(REGION_POPULATION_RELATIVE, 0.99, na.rm = TRUE), 
+                                             quantile(REGION_POPULATION_RELATIVE, 0.99, na.rm = TRUE), 
+                                             REGION_POPULATION_RELATIVE))
+
+# Updated obvious outliers. However to explore the problem more I am checking the skewness and NZV of the data
+
+```
+
+
+
+
+## Additional Data Cleaning and Analysis
+
+```{r}
+# Numeric columns from clean4
+clean4_num <- clean4[, sapply(clean4, is.numeric)]
+
+# Compute skewness for each numeric column
+skewValues <- as.data.frame(apply(clean4_num, 2, function(x) skewness(x, na.rm = TRUE)))
+
+# Rename the column and set the column names as a new column
+colnames(skewValues)[1] <- "skew_values"
+skewValues <- skewValues %>% 
+  rownames_to_column(var = "Column")
+
+# Order the skew values in desc order
+skewValues <- skewValues %>%
+  arrange(desc(skew_values))
+
+# Display the results
+skewValues %>% 
+  datatable(filter = 'top', options = list(
+    pageLength = 15, autoWidth = F
+  ))
+
+
+
+# Identify zero and near-zero variance predictors
+nzv_info <- nearZeroVar(clean4, saveMetrics=TRUE)
+
+# Display variables with zero or near-zero variance
+nzv_cols <- nzv_info[nzv_info$nzv == TRUE, ]
+print(nzv_cols)
+
+## FLAG_MOBIL seems that it won't add much information to a model. Mostly everyone has a mobile phone. 
+
+# Remove FLAG_MOBIL and variable
+clean4 <- clean4 %>%
+  select(-FLAG_MOBIL, -SK_ID_CURR)
+
+
+## Flagged documents and CB inquiries are more difficult, because they could add value to the model. May remove later on
+
+
+
+
+```
+## Feature Engineering
+
+```{r}
+## creatiing ratios I feel would add value to the model
+
+featured <- clean4 %>%
+  mutate(income_credit_ratio = AMT_INCOME_TOTAL / AMT_CREDIT,
+         annuity_credit_ratio = AMT_ANNUITY / AMT_CREDIT,
+         age_employment_ratio = DAYS_BIRTH / DAYS_EMPLOYED)
+
+# The below groupings aim to better analyze the relationship between these variables and default
+
+# Age Grouping 
+featured$age_group <- cut((featured$DAYS_BIRTH/365), 
+                        breaks = c(20, 35, 50, 65, 100), 
+                        labels = c("Young", "Middle-aged", "Senior", "Retired"))
+
+# Employment Grouping
+featured$employment_group <- cut((featured$DAYS_EMPLOYED/365), 
+                               breaks = c(0, 5, 10, 20, 50), 
+                               labels = c("Fresh", "Junior", "Experienced", "Veteran"))
+
+# Create temp data for random forest
+temp_data <- featured %>% drop_na()
+
+# RF model
+rf_model <- ranger(TARGET ~ income_credit_ratio + annuity_credit_ratio + age_employment_ratio + employment_group + age_group, 
+                   data = temp_data, 
+                   num.trees = 100, 
+                   importance = 'impurity')
+
+# check feature importance
+rf_model$variable.importance
+
+# The ratios were all equally important
+# groupings didn't have a strong compared importance scores to the ratio, removing from dataset
+
+featured <- clean4 %>%
+  mutate(income_credit_ratio = AMT_INCOME_TOTAL / AMT_CREDIT,
+         annuity_credit_ratio = AMT_ANNUITY / AMT_CREDIT,
+         age_employment_ratio = DAYS_BIRTH / DAYS_EMPLOYED)
+
+clean5 <- featured
+
+clean5 <- clean5[!is.infinite(clean5$age_employment_ratio), ]
+
+```
+
+
+## Feature Importance
+
+```{r}
+
+
+
+# Create formula for all predictors
+all_predictors <- setdiff(names(temp_data), "TARGET")
+formula_rf <- as.formula(paste("TARGET ~", paste(all_predictors, collapse = " + ")))
+
+# RF model 1 
+rf_model <- ranger(formula = formula_rf, 
+                   data = temp_data, 
+                   num.trees = 100, 
+                   importance = 'impurity')
+
+# Check feature importance
+rf_model$variable.importance
+
+
+# remove totalarea_mode
+temp_data <- temp_data %>%
+  select(-TOTALAREA_MODE)
+
+all_predictors <- setdiff(names(temp_data), "TARGET")
+formula_rf <- as.formula(paste("TARGET ~", paste(all_predictors, collapse = " + ")))
+
+# RF model on new temp data
+rf_model <- ranger(formula = formula_rf, 
+                   data = temp_data, 
+                   num.trees = 100, 
+                   importance = 'impurity')
+
+# Check feature importance
+rf_model$variable.importance
+
+
+# Top 20 features based on RF model
+top_n <- 20  
+important_vars <- head(sort(rf_model$variable.importance, decreasing = TRUE), top_n)
+
+# Bar Plot
+barplot(important_vars, las = 2, main = "Top Variable Importance from Random Forest", col = "steelblue", cex.names = 0.58)
+
+
+
+## Many of the variables have low importance. I set my threshold for removal at 25%. I will impute data for the remaining variables with missing data. 
+
+# Extract variable importances from the random forest model
+feature_importances <- rf_model$variable.importance
+
+# Threshold 1st quartile
+threshold <- quantile(feature_importances, 0.25)
+
+# Identify columns to be removed
+cols_to_remove <- names(feature_importances[feature_importances < threshold])
+
+# Remove the identified columns from clean5
+clean6 <- clean5[, !(names(clean5) %in% cols_to_remove)]
+
+
+## due to near zero variance and high volume of missing data, I am also removing columns 36-66
+clean7 <- clean6 %>%
+  select(-c(36:66))
+
+## clean7 notes: features selected (RF). Outliers removed. Data structure explored. 
+
+# Looking at remaining predictors and columns with missing data
+clean7 %>% skim() %>% kable()
+
+
+
+
+```
+
+## Imputation
+
+
+
+
+```{r echo=FALSE, results='asis'}
+
+
+
+## I wanted to use this method for imputation, but it took too long to process. 
+
+# Imputation methods
+#imp_methods <- sapply(clean6, function(x) {
+#  if(is.numeric(x)) {
+#    return("cart")
+#  } else if(is.factor(x) && length(unique(x)) == 2) {
+#    return("logreg")
+#  } else {
+#    return("polyreg")
+#  }
+#})
+# setup parallel 
+#cl <- makeCluster(8)
+
+# imputed
+#set.seed(123)  # Setting seed for reproducibility
+#imp <- mice(clean6, method = imp_methods, m = 3, n.imp.core=8)  
+#completed_data <- complete(imp, 1)
+
+
+## ** Impute active ** 
+
+# Columns to be imputed by median
+median_cols <- c("AMT_ANNUITY", "AMT_GOODS_PRICE", "annuity_credit_ratio", "AMT_REQ_CREDIT_BUREAU_WEEK", "AMT_REQ_CREDIT_BUREAU_MON", "AMT_REQ_CREDIT_BUREAU_QRT",        
+"AMT_REQ_CREDIT_BUREAU_YEAR", "OBS_30_CNT_SOCIAL_CIRCLE", "DEF_30_CNT_SOCIAL_CIRCLE", 
+"OBS_60_CNT_SOCIAL_CIRCLE", "DEF_60_CNT_SOCIAL_CIRCLE", "DAYS_LAST_PHONE_CHANGE", "EXT_SOURCE_1", "EXT_SOURCE_2")
+
+# Columns to be imputed by mean
+mean_cols <- c("CNT_FAM_MEMBERS", "EXT_SOURCE_3")
+
+
+# clean8 verision for datasets
+clean8 <- clean7
+
+# Impute by median
+for (col in median_cols) {
+  clean8 <- clean8 %>%
+    mutate(!!col := ifelse(is.na(!!sym(col)), median(!!sym(col), na.rm = TRUE), !!sym(col)))
+}
+
+# Impute by mean
+for (col in mean_cols) {
+  clean8 <- clean8 %>%
+    mutate(!!col := ifelse(is.na(!!sym(col)), mean(!!sym(col), na.rm = TRUE), !!sym(col)))
+}
+
+#clean8 %>% skim() %>% kable()
+
+## Since I noticed significant changes in the distributions for ext_source_1 in the first simple imputation,  I am removing it. ## Given it's importance, that may need to be re-addressed with my group. ext_source_3 might be a problem as well. 
+
+#clean8 <- clean8 %>%
+#  select(-EXT_SOURCE_1)
+
+clean8 %>% skim() %>% kable()
+
+
+```
+
+
+
+
+```{r}
+
+## Checking to see if feature importance is retained
+
+## RF Formula
+all_predictors3 <- setdiff(names(clean8), "TARGET")
+formula_rf3 <- as.formula(paste("TARGET ~", paste(all_predictors3, collapse = " + ")))
+
+# RF model on new temp data
+rf_model3 <- ranger(formula = formula_rf3, 
+                   data = clean8, 
+                   num.trees = 100, 
+                   importance = 'impurity')
+
+# Check feature importance
+rf_model3$variable.importance
+
+
+# Top 20 features based on RF model
+top_n <- 20  
+important_vars3 <- head(sort(rf_model3$variable.importance, decreasing = TRUE), top_n)
+
+# Bar Plot
+barplot(important_vars, las = 2, main = "Top Variable Importance from Random Forest 1", col = "steelblue", cex.names = 0.55)
+
+barplot(important_vars3, las = 2, main = "Top Variable Importance from Random Forest 3", col = "steelblue", cex.names = 0.55)
+
+## Important predictors changed slightly, but not significantly 
+
+
+```
+
+
+
+
+
+## Visualizations
+
+```{r}
+# Violin Plot for EXT_SOURCE_2 vs TARGET
+ggplot(clean8, aes(x=as.factor(TARGET), y=EXT_SOURCE_2, fill=as.factor(TARGET))) + 
+  geom_violin(alpha=0.7) +
+  ggtitle("Violin Plot of EXT_SOURCE_2 vs TARGET")
+
+# Boxplot for EXT_SOURCE_2 vs TARGET
+ggplot(clean8, aes(x=as.factor(TARGET), y=EXT_SOURCE_2, fill=as.factor(TARGET))) + 
+  geom_boxplot(alpha=0.7) +
+  ggtitle("Boxplot of EXT_SOURCE_2 vs TARGET")
+
+# Density Plot for EXT_SOURCE_2 segmented by TARGET
+ggplot(clean8, aes(x=EXT_SOURCE_2, fill=as.factor(TARGET))) + 
+  geom_density(alpha=0.7) +
+  ggtitle("Density Plot of EXT_SOURCE_2 segmented by TARGET")
+
+
+# Violin Plot for EXT_SOURCE_31 vs TARGET
+ggplot(clean8, aes(x=as.factor(TARGET), y=EXT_SOURCE_3, fill=as.factor(TARGET))) + 
+  geom_violin(alpha=0.7) +
+  ggtitle("Violin Plot of EXT_SOURCE_3 vs TARGET")
+
+# Boxplot for EXT_SOURCE_3 vs TARGET
+ggplot(clean8, aes(x=as.factor(TARGET), y=EXT_SOURCE_3, fill=as.factor(TARGET))) + 
+  geom_boxplot(alpha=0.7) +
+  ggtitle("Boxplot of EXT_SOURCE_3 vs TARGET")
+
+# Density Plot for EXT_SOURCE_3 segmented by TARGET
+ggplot(clean8, aes(x=EXT_SOURCE_3, fill=as.factor(TARGET))) + 
+  geom_density(alpha=0.7) +
+  ggtitle("Density Plot of EXT_SOURCE_3 segmented by TARGET")
+
+## You can see that EXT_SOURCE_3 was heavily skewed towards the mean by my imputation. 
+##  I am going to have look into finding a better method before including it in the final model. 
+
+```
+
+
+## Joining Transactional Data
+
+```{r}
+
+
+bureau_aggregated <- bureau %>%
+  group_by(SK_ID_CURR) %>%
+  summarize(
+    avg_credit = mean(AMT_CREDIT_SUM, na.rm = TRUE),
+    count_loans = n(),
+    active_loans = sum(CREDIT_ACTIVE == "Active", na.rm = TRUE),
+    closed_loans = sum(CREDIT_ACTIVE == "Closed", na.rm = TRUE),
+    avg_days_credit = mean(DAYS_CREDIT, na.rm = TRUE),
+    avg_days_overdue = mean(CREDIT_DAY_OVERDUE, na.rm = TRUE),
+  )
+
+## had to use an earlier version of the data for unique identifier
+
+joined_data <- left_join(clean3, bureau_aggregated, by = "SK_ID_CURR")
+
+
+## Removing NAs for RF model to check feature importance
+temp_data2 <- na.omit(joined_data[, c("TARGET", "avg_credit", "count_loans", "active_loans", "closed_loans", "avg_days_credit", "avg_days_overdue")])
+
+
+
+# RF model number 4
+rf_model4 <- ranger(factor(TARGET) ~ avg_credit + count_loans + active_loans + closed_loans + avg_days_credit + avg_days_overdue, 
+                    data = temp_data2, 
+                    num.trees = 100, 
+                    importance = 'impurity')
+
+
+# check feature importance
+rf_model4$variable.importance
+
+
+## plotting the two most important variables 
+
+#avg_days_credit
+
+# Violin Plot for avg_days_credit vs TARGET
+ggplot(joined_data, aes(x=as.factor(TARGET), y=avg_days_credit, fill=as.factor(TARGET))) + 
+  geom_violin(alpha=0.7) +
+  ggtitle("Violin Plot of avg_days_credit vs TARGET")
+
+# Boxplot for avg_days_credit vs TARGET
+ggplot(joined_data, aes(x=as.factor(TARGET), y=avg_days_credit, fill=as.factor(TARGET))) + 
+  geom_boxplot(alpha=0.7) +
+  ggtitle("Boxplot of avg_days_credit vs TARGET")
+
+# Density Plot for avg_days_credit segmented by TARGET
+ggplot(joined_data, aes(x=avg_days_credit, fill=as.factor(TARGET))) + 
+  geom_density(alpha=0.7) +
+  ggtitle("Density Plot of avg_days_credit segmented by TARGET")
+
+## avg_credit
+
+# Violin Plot for avg_credit vs TARGET
+ggplot(joined_data, aes(x=as.factor(TARGET), y=avg_credit, fill=as.factor(TARGET))) + 
+  geom_violin(alpha=0.7) +
+  ggtitle("Violin Plot of avg_credit vs TARGET")
+
+# Boxplot for avg_credit vs TARGET
+ggplot(joined_data, aes(x=as.factor(TARGET), y=avg_credit, fill=as.factor(TARGET))) + 
+  geom_boxplot(alpha=0.7) +
+  ggtitle("Boxplot of avg_credit vs TARGET")
+
+# Density Plot for avg_credit segmented by TARGET
+ggplot(joined_data, aes(x=avg_credit, fill=as.factor(TARGET))) + 
+  geom_density(alpha=0.7) +
+  ggtitle("Density Plot of avg_credit segmented by TARGET")
+
+
+```
+
+
+## Test Set Cleaning
+
+```{r}
+
+
+clean_test_data <- function(test_data) {
+
+  # Part 2: Handling Missing Values and Outliers
+  # Calculate the proportion of missing values for each column
+  missing_props <- map_dbl(test_data, ~mean(is.na(.)))
+  # Filter out columns with more than 60% missing values
+  test1 <- test_data %>% select(which(missing_props <= 0.6))
+  
+  # Factoring categorical variables
+  test2 <- test1
+  test2[] <- lapply(test1, function(x) if (is.character(x)) factor(x) else x)
+  
+  # Changing negative values to absolute values
+  test3 <- test2 %>%
+    mutate(
+      DAYS_BIRTH = ifelse(DAYS_BIRTH < 0, abs(DAYS_BIRTH), DAYS_BIRTH),
+      DAYS_EMPLOYED = ifelse(DAYS_EMPLOYED < 0, abs(DAYS_EMPLOYED), DAYS_EMPLOYED),
+      DAYS_REGISTRATION = ifelse(DAYS_REGISTRATION < 0, abs(DAYS_REGISTRATION), DAYS_REGISTRATION),
+      DAYS_ID_PUBLISH = ifelse(DAYS_ID_PUBLISH < 0, abs(DAYS_ID_PUBLISH), DAYS_ID_PUBLISH),
+      DAYS_LAST_PHONE_CHANGE = ifelse(DAYS_LAST_PHONE_CHANGE < 0, abs(DAYS_LAST_PHONE_CHANGE), DAYS_LAST_PHONE_CHANGE))
+  
+  # Dealing with outliers
+  test4 <- test3 %>%
+    mutate(AMT_INCOME_TOTAL = ifelse(AMT_INCOME_TOTAL > quantile(AMT_INCOME_TOTAL, 0.99, na.rm = TRUE), 
+                                     quantile(AMT_INCOME_TOTAL, 0.99, na.rm = TRUE), 
+                                     AMT_INCOME_TOTAL)) %>%
+    mutate(DAYS_EMPLOYED = ifelse(DAYS_EMPLOYED == 365243, 
+                                  median(DAYS_EMPLOYED[DAYS_EMPLOYED != 365243], na.rm = TRUE), 
+                                  DAYS_EMPLOYED)) %>%
+    mutate(CNT_CHILDREN = ifelse(CNT_CHILDREN > 5, 5, CNT_CHILDREN)) %>%
+    mutate(AMT_REQ_CREDIT_BUREAU_QRT = ifelse(AMT_REQ_CREDIT_BUREAU_QRT > quantile(AMT_REQ_CREDIT_BUREAU_QRT, 0.95, na.rm = TRUE),
+                                              quantile(AMT_REQ_CREDIT_BUREAU_QRT, 0.95, na.rm = TRUE),
+                                              AMT_REQ_CREDIT_BUREAU_QRT)) %>%
+    mutate(REGION_POPULATION_RELATIVE = ifelse(REGION_POPULATION_RELATIVE > quantile(REGION_POPULATION_RELATIVE, 0.99, na.rm = TRUE), 
+                                               quantile(REGION_POPULATION_RELATIVE, 0.99, na.rm = TRUE), 
+                                               REGION_POPULATION_RELATIVE))
+  
+  # Part 4: Feature Engineering
+  test4 <- test4 %>%
+    mutate(income_credit_ratio = AMT_INCOME_TOTAL / AMT_CREDIT,
+           annuity_credit_ratio = AMT_ANNUITY / AMT_CREDIT,
+           age_employment_ratio = DAYS_BIRTH / DAYS_EMPLOYED)
+  # Remove infinite values
+  test4 <- test4[!is.infinite(test4$age_employment_ratio), ]
+  
+  # Part 5: More Cleaning and Final Preparations
+  # Impute missing values
+  median_cols <- c("AMT_ANNUITY", "AMT_GOODS_PRICE", "annuity_credit_ratio", "AMT_REQ_CREDIT_BUREAU_WEEK", "AMT_REQ_CREDIT_BUREAU_MON", "AMT_REQ_CREDIT_BUREAU_QRT",        
+"AMT_REQ_CREDIT_BUREAU_YEAR", "OBS_30_CNT_SOCIAL_CIRCLE", "DEF_30_CNT_SOCIAL_CIRCLE", 
+"OBS_60_CNT_SOCIAL_CIRCLE", "DEF_60_CNT_SOCIAL_CIRCLE", "DAYS_LAST_PHONE_CHANGE", "EXT_SOURCE_1", "EXT_SOURCE_2")
+  mean_cols <- c("CNT_FAM_MEMBERS", "EXT_SOURCE_3")
+  
+  for (col in median_cols) {
+    test4 <- test4 %>%
+      mutate(!!col := ifelse(is.na(!!sym(col)), median(!!sym(col), na.rm = TRUE), !!sym(col)))
+  }
+  
+  for (col in mean_cols) {
+    test4 <- test4 %>%
+      mutate(!!col := ifelse(is.na(!!sym(col)), mean(!!sym(col), na.rm = TRUE), !!sym(col)))
+  }
+
+
+  return(test4)
+}
+
+library(purrr)
+
+test_cleaned <- clean_test_data(test_data)
+
+
+
+# Get the names of the columns in clean8
+clean8_columns <- colnames(clean8)
+
+# Find the common columns between test_cleaned and clean8
+common_columns <- intersect(colnames(test_cleaned), clean8_columns)
+
+# Select only the common columns from test_cleaned
+test_cleaned2 <- test_cleaned[, common_columns, drop = FALSE]
+
+
+test_cleaned2 %>% skim() %>% kable()
+
+
+
+
+
+
+```
+
+
+
+
+
+
+# III. Final Modeling
+
+> For our final predictive model, we selected XGBoost (eXtreme Gradient Boosting) due to its well-documented efficiency, especially in handling complex datasets like ours. One of the key factors that influenced this choice was the algorithm's built-in regularization capabilities, which help prevent overfitting—an essential consideration given our dataset's high dimensionality and class imbalance.
+
+> In the initial phase of model training, we partitioned our cleaned dataset into an 85% training subset and a 15% validation subset. This allowed us to train our model on a representative sample of the data while retaining a separate portion for model evaluation, thereby avoiding the risk of overfitting, and ensuring that our model's performance metrics would generalize well to unseen data.
+
+> We then converted our training and testing datasets into an optimized matrix format that XGBoost utilizes, which enhances the model training efficiency. With the data prepared, we embarked on the hyperparameter tuning process. We experimented with various configurations of learning rates, tree complexities (depths), and subsampling rates. Additionally, the scale_pos_weight parameter was critical in calibrating the model to address the imbalance in our target variable, ensuring that the minority class was appropriately weighted during learning.
+
+> Our experimentation also extended to the evaluation metrics. We found that "logloss" was more indicative of model performance for our binary classification task than "ROC", leading us to adopt it as our primary metric during the tuning phase.
+The final model configuration was reached after extensive iterative testing. While we maintained an average AUC of around 0.72 during this phase, our best model, which achieved an accuracy of 92.02% and a Kaggle score of 76, had to be adjusted for practical reasons. The optimal model was trained over 2000 rounds, but due to computational constraints and the extensive time required for convergence—approximately 45 minutes—we opted for a slightly less complex model for our submission.
+
+> This final submitted model, trained with 20 rounds and the hyperparameters provided in the code, still performed admirably. It was able to achieve a considerable AUC of 0.7483, which is indicative of its strong predictive power, despite the inherent challenges presented by the imbalanced dataset.
+In summary, our modeling journey with XGBoost was characterized by a careful balance between model complexity, performance, and practical constraints, leading to a final model that we believe capably captures the underlying patterns in the data while being computationally feasible.
+
+
+## XGBOOST @ 20 Rounds
+
+```{r}
+
+# 1. Installing and loading necessary libraries
+if (!requireNamespace("xgboost", quietly = TRUE)) install.packages("xgboost")
+if (!requireNamespace("caret", quietly = TRUE)) install.packages("caret")
+library(xgboost)
+library(caret)
+
+
+# Preparing the data for training and testing
+set.seed(42)
+
+labels <- clean8$TARGET
+data <- clean8 %>% select(-TARGET)
+
+# Splitting the data into training (80%) and validation (20%) sets
+index <- createDataPartition(labels, p = 0.85, list = FALSE)
+train_data <- data[index, ]
+train_labels <- labels[index]
+test_data <- data[-index, ]
+test_labels <- labels[-index]
+
+# Converting data to matrix
+train_matrix <- xgb.DMatrix(data = model.matrix(~. - 1, data = train_data), label = train_labels)
+test_matrix <- xgb.DMatrix(data = model.matrix(~. - 1, data = test_data), label = test_labels)
+
+# Training the xgboost model
+params <- list(
+  objective = "binary:logistic",
+  eta = 0.1,
+  max_depth = 6,
+  nthread = 3,
+  eval_metric = "logloss"
+)
+
+
+
+p <- list(objective = "binary:logistic"
+         , booster = "gbtree"
+         , eval_metric = "logloss"
+         , nthread = 6
+         , eta = 0.01
+         , max_depth = 12
+         , min_child_weight = 25
+         , subsample = 0.75
+         , scale_pos_weight = 2
+         , colsample_bytree = 0.75
+)
+
+
+model <- xgboost(
+  data = train_matrix,
+  params = p,
+  nrounds = 20,
+  gamma = 0.009,
+)
+
+
+
+# Making predictions on the test set
+pred_probs <- predict(model, newdata = test_matrix)
+pred_labels <- as.numeric(pred_probs > 0.50)  # Convert to 0 and 1 based on threshold
+
+# Calculating the accuracy of the model on the test set
+accuracy <- sum(pred_labels == test_labels) / length(test_labels)
+print(accuracy)
+
+cm <- confusionMatrix(as.factor(pred_labels), as.factor(test_labels))
+print(cm)
+
+
+roc_result <- roc(test_labels, pred_probs)
+auc(roc_result)
+
+
+plot(roc_result, main="ROC Curve")
+abline(a=0, b=1, lty=2, col="gray")  
+
+
+```
+
+## Model Prep  
+```{r}
+# unique factors
+
+# Getting the factor variables
+factor_vars <- sapply(train_data, is.factor)
+
+# Getting the unique levels of factor variables in the training data
+unique_levels <- lapply(train_data[factor_vars], function(x) unique(levels(x)))
+
+# Setting the levels of factor variables in the test data to be the same as in the training data
+test_cleaned2[factor_vars] <- Map(function(x, y) factor(x, levels = y), test_cleaned2[factor_vars], unique_levels)
+
+# create the model matrices
+model_matrix_train <- model.matrix(~. - 1, data = clean8)
+model_matrix_test <- model.matrix(~. - 1, data = test_cleaned2)
+
+# Check if the column names are the same
+all(colnames(model_matrix_train) == colnames(model_matrix_test))
+
+
+
+
+## for submit
+
+#pred_probs <- predict(model, newdata = model_matrix_test)
+
+#ids <- test_data$SK_ID_CURR
+
+#submission <- data.frame(SK_ID_CURR = ids, TARGET = pred_probs)
+
+#write_csv(submission, "submission_file_5000.csv")
+
+``` 
+
+
+
+## Kaggle Submission 
+
+```{r, echo=FALSE, out.width='100%', fig.cap="Caption for the Kaggle Scores"}
+knitr::include_graphics("Kaggle_Scores.png")
+```
+
+# IV. Conclusions & Next Steps 
+
+
+> Per the above XGBoosted algorithm we were able to successfully take our testing data and apply it to the model. We are knowledgeable enough about the data and our model to make adjustments to accomodate different thresholds of customers to maximize loan approvals and cut down on the number of potential defaults. 
+
+## Balancing Risk and Inclusion 
+
+> Our team has developed a predictive model that estimates the likelihood of individuals defaulting on loans. While this model effectively narrows down the risk pool, it doesn’t rule out the possibility of default for any particular individual. Recognizing this, we aim to initiate a strategic discussion on setting appropriate thresholds for loan approval criteria. These thresholds can be adjusted dynamically in response to the prevailing economic climate, giving management the flexibility to tighten or relax loan eligibility as needed.
+
+> In practice, we applied two models concurrently to illustrate the impact of changing the default prediction threshold. By increasing the threshold, we deliberately accept more false negatives, which directly influences the model's risk sensitivity. This adjustment allows us to explore the equilibrium between extending credit to a broader spectrum of applicants, including those with minimal banking history, and upholding strict lending standards to safeguard against default risks.
+
+> A higher threshold in the model means default is predicted less often, which can be beneficial for including customers who may have limited financial history but also increases the lender's exposure to potential defaults. By expanding credit offerings to this underrepresented group, we not only grow our customer base but also contribute to greater financial inclusiveness. Our analysis aims to provide management with insight into how threshold settings affect loan accessibility and risk, empowering informed decision-making that aligns with the company’s risk appetite and market growth objectives.
+
+
+![Credit Evaluation](Credit_Eval .png) 
+
+> Our evaluation revealed consistent model performance across various train/test splits, confirming stability in our metrics. Therefore, we have presented results from the conventional 70/30 split for simplicity. 
+
+> The table above shows the compromises that must be made when defining the acceptance criteria for a default/non-default ruling. Ideally, everyone who is not going to default can get a loan. This metric is captured by the True Negative Rate, which improves as the Prediction Threshold increases. In an optimal solution, no one who is going to default is mistakenly offered a loan either. This is the False Negative Rate, which worsens as the prediction threshold increases. These metrics are relatively intangible, so the results can be interpreted using the Positive and Negative Predictive Values, which show how likely a provided result is to be correct. We can see that these two values vary in opposite directions as the Prediction Threshold increases. The final decision by Home Credit will have to select a threshold that balances excluding “no-default” customers from the marketplace (PPV) while allowing some customers who will default into the marketplace (NPV).
+
+> Looking ahead, the strategic use of these modeling insights could enable Home Credit to fine-tune their credit scoring algorithms. By considering the trade-offs between market expansion and risk management, we can adapt their models to better serve varied customer segments. Including non-conventional data in risk assessment could provide a more accurate financial profile for underbanked individuals. Furthermore, the results support the development of customized financial products that balance risk and access to credit, thereby contributing to broader economic participation among traditionally underserved populations.
+
+## Conclusion
+
+> Our next steps include determining the amount of risk Home Credit management is willing to accept in losses due to default, employ this model and put it into production in a test environment with new customers, determine sales goals and quotas for periods of time and geographic locations, and lastly and most importantly create a new standard for data collection such that our employees capture all of the data that is required to present the best case for a customer to apply for and obtain a loan from us.   
+
+
