@@ -1,0 +1,842 @@
+---
+title: "Capstone2_EDA"
+author: "Aiden Coutin"
+date: "2023-10-15"
+output: 
+  html_document:
+    toc: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+
+library(tidyverse)
+library(psych)
+library(corrplot)
+library(regclass)
+library(caret)
+library(rminer)
+
+```
+
+## Business Problem
+The business problem faced by Home Credit is that people need credit to get credit, and the lack thereof results in higher costs for people who are completely capable of repaying loans. The objective of this model is to develop a method to predict the risk of default of a person without a credit score. This will mean that these potential clients can then be offered loans with lower overall costs that reduced their financial burden and increases the amount of business that Home Credit generates. 
+
+This problem is a supervised classification problem. The target variable is whether a client would have payment difficulties over an initial time period of the loan. The deliverable of this project will be a robust method to integrate the datasets, which can then be used by an algorithm to determine if a specific potential client is predicted to have payment difficulties in the future. 
+
+## EDA Notebook
+The intent of this preliminary analysis will be to become familiar with the data available in the primary dataset, and possibly others. The available variables will be cleaned as necessary and reduced to the variables that are most relevant in predicting the target.
+
+Questions faced in this dataset include: 
+- how clean is the data?
+- how many of the available variables are truly usable?
+- which variables are intuitively or clearly not good predictors?
+- how complicated are the variables?
+- are there variables that are heavily correlated?
+- is principal component analysis useful?
+- can variables with high NA percentages be removed?
+- can I train a model using the existence of NAs or not?
+- how much variability is acceptable for a possible predictor
+- if I divide two numbers, is that the same as doing the interaction?
+
+## Function Definition
+``` {r function declaration}
+typAndUniqCnt <- function(data1) {
+  # get types and unique counts of variables
+  c1 <- colnames(data1)
+  ab <- data.frame()
+  for (ii in 1:ncol(data1)) {
+    ab[ii,1]<-c1[ii]
+    ab[ii,2]<-length(unique(data1[,ii]))
+    ab[ii,3]<-class(data1[1,ii])
+    #print(c1[ii])
+    #print(unique(data1[,ii]))
+  }
+  print(ab[order(ab[,2], decreasing = TRUE),])
+}
+
+sumNa <- function(data1,data2,thresh) {
+  c1 <- colnames(data1)
+  
+  nr <- nrow(data1)
+  nr2 <- nrow(data2)
+  
+  df <- data.frame()
+  ct <- 0
+  for (ii in 1:ncol(data1)) {
+    #if (!is.numeric(data1[,ii])) {
+    ct <- ct+1
+    df[ct,1] <- c1[ii]
+    df[ct,2] <- length(unique(data1[,ii]))
+    df[ct,3] <- round(sum(is.na(data1[,ii]))/nr,3)
+    
+    if (c1[ii]=="TARGET") {
+      df[ct,4] <- NaN
+      df[ct,5] <- NaN
+    } else {
+      df[ct,4] <- length(unique(data2[,c1[ii]]))
+      df[ct,5] <- round(sum(is.na(data2[,c1[ii]]))/nr2,3)
+    }
+    #}
+  }
+  colnames(df) <- c("Removed Columns","cntUnique_Train","percNA_Train","cntUnique_Test","percNA_Test")
+  
+  data1 <- subset(data1, select = c1[df[,3]<=thresh]) # remove cols with > 45% NA
+  
+  df <- df[df[,3]>thresh,]
+  print(df[order(df$percNA_Train, decreasing = TRUE),1:3])
+  
+  return(data1)
+}
+
+dataMutate1 <- function(data1,option){
+  if (option==0) {
+    #data1 <- data1 %>%
+    #  mutate(TARGET= factor(TARGET))
+  } else if (option==1) {
+    data1 <- data1 %>%
+    mutate(
+      AMT_REQ_CREDIT_BUREAU_HOUR = ifelse(is.na(AMT_REQ_CREDIT_BUREAU_HOUR),-999,AMT_REQ_CREDIT_BUREAU_HOUR),
+      AMT_REQ_CREDIT_BUREAU_DAY=ifelse(is.na(AMT_REQ_CREDIT_BUREAU_DAY),-999,AMT_REQ_CREDIT_BUREAU_DAY),
+      AMT_REQ_CREDIT_BUREAU_WEEK=ifelse(is.na(AMT_REQ_CREDIT_BUREAU_WEEK),-999,AMT_REQ_CREDIT_BUREAU_WEEK),
+      AMT_REQ_CREDIT_BUREAU_MON=ifelse(is.na(AMT_REQ_CREDIT_BUREAU_MON),-999,AMT_REQ_CREDIT_BUREAU_MON),
+      AMT_REQ_CREDIT_BUREAU_QRT=ifelse(is.na(AMT_REQ_CREDIT_BUREAU_QRT),-999,AMT_REQ_CREDIT_BUREAU_QRT),
+      AMT_REQ_CREDIT_BUREAU_YEAR=ifelse(is.na(AMT_REQ_CREDIT_BUREAU_YEAR),-999,AMT_REQ_CREDIT_BUREAU_YEAR))
+  } else if (option==2) {
+    # days employed has some positive values EQ to -1000 years which is wrong --> changed to zero
+    # converted days to years for ease of understanding
+    data1 <- data1 %>%
+      mutate(DAYS_EMPLOYED = ifelse(DAYS_EMPLOYED>0,0,DAYS_EMPLOYED)) %>%
+      mutate(YEARS_BIRTH = -DAYS_BIRTH/365,
+             YEARS_REGISTRATION = -DAYS_REGISTRATION/365,
+             YEARS_EMPLOYED = -DAYS_EMPLOYED/365,
+             YEARS_ID_PUBLISH  = -DAYS_ID_PUBLISH/365,
+             YEARS_LAST_PHONE_CHANGE = -DAYS_LAST_PHONE_CHANGE/365) %>%
+      subset(select = -c(DAYS_BIRTH,DAYS_REGISTRATION,
+                         DAYS_EMPLOYED,DAYS_ID_PUBLISH,
+                         DAYS_LAST_PHONE_CHANGE))
+  } else if (option==3) {
+    data1 <- data1 %>% 
+      mutate(NAME_FAMILY_STATUS = ifelse(NAME_FAMILY_STATUS=="Unknown","Married",NAME_FAMILY_STATUS),
+             NAME_TYPE_SUITE = ifelse(NAME_TYPE_SUITE=="Group of people" | NAME_TYPE_SUITE=="Children" |
+                                        NAME_TYPE_SUITE=="Other_A" | NAME_TYPE_SUITE=="Family" |
+                                        NAME_TYPE_SUITE=="Other_B","Other",NAME_TYPE_SUITE),
+             NAME_EDUCATION_TYPE = ifelse(NAME_EDUCATION_TYPE=="Academic degree",
+                                          "Higher education",NAME_EDUCATION_TYPE),
+             NAME_INCOME_TYPE = ifelse(NAME_INCOME_TYPE=="Businessman" |
+                                       NAME_INCOME_TYPE=="Commercial associate", "Working",
+                                ifelse(NAME_INCOME_TYPE=="Maternity leave" | 
+                                       NAME_INCOME_TYPE=="Pensioner" | 
+                                       NAME_INCOME_TYPE=="State servant" |
+                                       NAME_INCOME_TYPE=="Student" | 
+                                       NAME_INCOME_TYPE=="Unemployed", "Low income",NAME_INCOME_TYPE)),
+             NAME_FAMILY_STATUS = ifelse(NAME_FAMILY_STATUS=="Civil marriage","Married",NAME_FAMILY_STATUS))
+  } else if (option==4) {
+    data1 <- data1 %>%
+      mutate(NAME_CONTRACT_TYPE = factor(NAME_CONTRACT_TYPE),
+             NAME_EDUCATION_TYPE = factor(NAME_EDUCATION_TYPE),
+             NAME_FAMILY_STATUS = factor(NAME_FAMILY_STATUS),
+             NAME_HOUSING_TYPE = factor(NAME_HOUSING_TYPE),
+             NAME_INCOME_TYPE = factor(NAME_INCOME_TYPE),
+             NAME_TYPE_SUITE = factor(NAME_TYPE_SUITE))
+  } else if (option==5) {
+    #categorize organizations and occupations as generally white or blue collar work
+    data1 <- data1 %>%
+      mutate(ORGANIZATION_TYPE = ifelse(ORGANIZATION_TYPE=="Advertising" |
+                                          ORGANIZATION_TYPE=="Bank" | 
+                                          ORGANIZATION_TYPE=="Business Entity Type 1" |
+                                          ORGANIZATION_TYPE=="Business Entity Type 2" | 
+                                          ORGANIZATION_TYPE=="Business Entity Type 3" |
+                                          ORGANIZATION_TYPE=="Culture" | 
+                                          ORGANIZATION_TYPE=="Emergency" | 
+                                          ORGANIZATION_TYPE=="Government" | 
+                                          ORGANIZATION_TYPE=="Insurance" | 
+                                          ORGANIZATION_TYPE=="Kindergarten" | 
+                                          ORGANIZATION_TYPE=="Legal Services" |
+                                          ORGANIZATION_TYPE=="Medicine" | 
+                                          ORGANIZATION_TYPE=="Realtor" | 
+                                          ORGANIZATION_TYPE=="Religion" | 
+                                          ORGANIZATION_TYPE=="School" | 
+                                          ORGANIZATION_TYPE=="Self-employed" | 
+                                          ORGANIZATION_TYPE=="University", "White",
+                                        ifelse(ORGANIZATION_TYPE=="XNA","Unknown_ORG","Blue")))
+    
+    data1 <- data1 %>%
+      mutate(OCCUPATION_TYPE = ifelse(OCCUPATION_TYPE=="Laborers" |
+                                        OCCUPATION_TYPE=="Drivers" |
+                                        OCCUPATION_TYPE=="Cleaning staff" |
+                                        OCCUPATION_TYPE=="Cooking staff" |
+                                        OCCUPATION_TYPE=="Sales staff" |
+                                        OCCUPATION_TYPE=="Security staff" |
+                                        OCCUPATION_TYPE=="Waiters/barmen staff" |
+                                        OCCUPATION_TYPE=="Low-skill Laborers",
+                                      "Blue",
+                                      ifelse(OCCUPATION_TYPE=="","Unknown_OCC","White")))
+  } else if (option==6) {
+    data1 <- data1 %>%
+      mutate(FLAG_OWN_CAR = ifelse(FLAG_OWN_CAR=="Y",1,0),
+             FLAG_DOCUMENT_ANY = ifelse(FLAG_DOCUMENT_ANY,1,0),
+             FLAG_OWN_REALTY = ifelse(FLAG_OWN_REALTY=="Y",1,0))
+  } else if (option ==7) {
+    data1 <- data1 %>%
+      mutate(DEF_30_CNT_SOCIAL_CIRCLE = ifelse(is.na(DEF_30_CNT_SOCIAL_CIRCLE),
+                 median(DEF_30_CNT_SOCIAL_CIRCLE,na.rm=TRUE),DEF_30_CNT_SOCIAL_CIRCLE),
+             AMT_ANNUITY = ifelse(is.na(AMT_ANNUITY),
+                 median(AMT_ANNUITY,na.rm=TRUE),AMT_ANNUITY),
+             YEARS_LAST_PHONE_CHANGE = ifelse(is.na(YEARS_LAST_PHONE_CHANGE),
+                 0,YEARS_LAST_PHONE_CHANGE),
+             AMT_GOODS_PRICE = ifelse(is.na(AMT_GOODS_PRICE),
+                 median(AMT_GOODS_PRICE,na.rm=TRUE),AMT_GOODS_PRICE),
+             AMT_INCOME_TOTAL = ifelse(AMT_INCOME_TOTAL > quantile(AMT_INCOME_TOTAL, 0.99, na.rm = TRUE), 
+                                   quantile(AMT_INCOME_TOTAL, 0.99, na.rm = TRUE), 
+                                   AMT_INCOME_TOTAL))
+    
+    
+  }
+  return(data1)
+}
+
+dataMutate2 <- function(data1,option) {
+  if (option==1) {
+    # not HOUR, WEEK, QRT
+    # not DAY, YEAR
+    # keep MONTH
+    
+    tS <- data1$AMT_REQ_CREDIT_BUREAU_MON
+    data1 <- data1 %>%
+      mutate(CREDIT_CHECK_KWN=tS>=0)
+
+    data1 <- subset(data1, 
+                    select = -c(AMT_REQ_CREDIT_BUREAU_DAY, 
+                                AMT_REQ_CREDIT_BUREAU_YEAR, 
+                                AMT_REQ_CREDIT_BUREAU_QRT, 
+                                AMT_REQ_CREDIT_BUREAU_WEEK, 
+                                AMT_REQ_CREDIT_BUREAU_HOUR))
+  } else if (option==2) {
+    c1 <- colnames(data1)
+    ind <- grepl("FLAG_DOCUMENT_[SUM1234567890()]", c1)
+    tmp <- rowSums(data1[,ind])>0 # TRUE if missing docs
+    
+    a<-data1[,ind]
+    for (ii in 1:ncol(a)) {
+      # suppressed output for final printout
+      #print(round(table(a[,ii], data1$TARGET*ii)/nrow(data1)*100,1))
+    }
+    
+    data1 <- subset(data1, select = c1[!ind]) # remove individual flag docs
+    data1$FLAG_DOCUMENT_ANY <- tmp # add flag of any missing docs
+    
+    
+  } else if (option==3) {
+    c1 <- colnames(data1)
+    ind <- grepl("EXT_SOURCE_[1234567890()]", c1)
+    data1 <- subset(data1, select = c1[!ind]) # remove external sources
+  } else if (option==4) {
+    data1 <- data1 %>%
+      mutate(FLAG_WORK_PHONE = ifelse(FLAG_EMP_PHONE+FLAG_WORK_PHONE>=1,1,0),
+             FLAG_PHONE = ifelse(FLAG_MOBIL+FLAG_PHONE>=1,1,0)) %>%
+      subset(select = -c(FLAG_CONT_MOBILE, FLAG_MOBIL, FLAG_EMAIL, 
+                         FLAG_EMP_PHONE, FLAG_OWN_REALTY))
+    
+  } else if (option==5) {
+    data1 <- data1 %>%
+      subset(select = -c(REGION_RATING_CLIENT_W_CITY,
+                         REG_REGION_NOT_LIVE_REGION,
+                         REG_REGION_NOT_WORK_REGION))
+    # REG_CITY_NOT_WORK_CITY
+
+  } else if (option==6){
+    # YEARS_REGISTRATION sensitivity is fairly low and correlated to YEARS_BIRTH
+    # WEEKDAY_APPR_PROCESS_START, WALLSMATERIAL_MODE are not good predictors
+    data1 <- data1 %>%
+      subset(select = -c(YEARS_REGISTRATION, WEEKDAY_APPR_PROCESS_START,WALLSMATERIAL_MODE))
+  } else if (option==7) {
+    data1 <- data1 %>%
+      mutate(ISMALE = ifelse(CODE_GENDER=="M",1,ifelse(CODE_GENDER=="F",2,3)),
+             #HOUSETYPE_MODE = ifelse(HOUSETYPE_MODE=="block of flats",HOUSETYPE_MODE,"Other")),
+             EMERGENCYSTATE_MODE = ifelse(EMERGENCYSTATE_MODE=="Yes",1,
+                                   ifelse(EMERGENCYSTATE_MODE=="No",2,3))) %>%
+      subset(select = -c(ORGANIZATION_TYPE,CODE_GENDER,FONDKAPREMONT_MODE))
+  } else if (option==8) {
+    data1 <- data1 %>%
+      subset(select = -c(LIVE_REGION_NOT_WORK_REGION,LIVE_CITY_NOT_WORK_CITY))
+  } else if (option==9) {
+    data1 <- data1 %>%
+      mutate(CNT_FAM_MEMBERS=CNT_FAM_MEMBERS-CNT_CHILDREN) %>%
+      mutate(CNT_FAM_MEMBERS=ifelse(is.na(CNT_FAM_MEMBERS),0,CNT_FAM_MEMBERS)) %>%
+      subset(select = 
+               -c(DEF_60_CNT_SOCIAL_CIRCLE,OBS_30_CNT_SOCIAL_CIRCLE,
+                  OBS_60_CNT_SOCIAL_CIRCLE))
+  }
+  
+  return(data1)
+}
+
+
+```
+
+## Load Data
+```{r readData}
+
+setwd("C:\\Users\\amcou\\Documents\\GradSchool\\Classes\\S3 Fall 2023\\Capstone 2\\Assignments\\Project")
+
+fil1 <- "application_train.csv"
+fil2 <- "application_test.csv"
+fil3 <- "bureau_balance.csv"
+fil4 <- "credit_card_balance.csv"
+fil5 <- "bureau.csv"
+fil6 <- "installments_payments.csv"
+fil7 <- "POS_CASH_balance.csv"              
+fil8 <- "previous_application.csv" 
+
+data1 <- read.csv(fil1)
+data2 <- read.csv(fil2)
+# data3 <- read.csv(fil3)
+data4 <- read.csv(fil4)
+# data5 <- read.csv(fil5)
+# data6 <- read.csv(fil6)
+# data7 <- read.csv(fil7)
+# data8 <- read.csv(fil8)
+
+```
+
+## Initial Data Exploration
+```{r majority classifier and first cleaning}
+# percent of default: majority classifier
+data1$TARGET %>% mean
+
+data1 <- dataMutate1(data1, 0) # turn TARGET to a factor (currently disabled)
+data2 <- dataMutate1(data2, 0)
+
+# print data summary of NA percents and remove cols when NAs > 45%
+thresh <- 0.45
+data1 <- sumNa(data1,data2,thresh)
+
+```
+
+The data is unbalanced: the target variable is TRUE only about 8.1% of the time. This would be the accuracy of a simple majority class classifier.
+
+Data with a significant percentage of NAs are not usable as inputs in a model due to the need to remove rows or interpolate values. Upon observation, there is a set of columns with 45% or more NAs, and below that the next highest NA percentage is ~16%. The columns with 45% or greater NA percentages are removed as unusable, and other columns will be handled as necessary. 
+
+# EDA
+## AMT_REQ_CREDIT_BUREAU Checks
+```{r CVD_1}
+# replace NA vals for credit check counts with -999
+c1 <- colnames(data1)
+data1 <- dataMutate1(data1,1)
+#dataMutate1(,1) <-- remove NAs from CREDIT REQs and replace with -999 (indicating never)
+
+data1a <- data1 %>% select(starts_with("AMT_REQ_CREDIT_"))
+colnames(data1a) <- sub("AMT_REQ_CREDIT_BUREAU_", "", colnames(data1a))
+data1a$TARGET <- data1$TARGET
+d <- cor(data1a)
+corrplot(d, method="color", title="Correlation: Credit Checks")
+
+# tested for all AMT_REQ columns --> selected MONTH
+tS <-data1$AMT_REQ_CREDIT_BUREAU_MON
+t1 <- table(tS,data1$TARGET)
+t1[,2]<-round(t1[,1]/rowSums(t1),2)
+colnames(t1) <- c("CountNotDef","PercNotDef")
+print(t1)
+
+# remove credit check cols, external sources, and singular doc flags
+data1 <- dataMutate2(data1, 1)
+data1 <- dataMutate2(data1, 2)
+data1 <- dataMutate2(data1, 3)
+
+```
+
+The NAs in the credit check variables were replaced with -999 to indicate when a credit check had never occurred or was unknown. The chart above shows that all variables about the credit checks are correlated. The months frequency was selected because it had the highest variation of DEFAULT/NOT percentage across its unique values and all other variables were removed. An additional boolean variable was created that captures if a credit check was ever performed or not.
+
+There are many flag documents indicating if a singular document was missing or not. These variables were aggregated into a single boolean if any documents were missing or not. The training data also contains several external sources. This data may be similar to a credit score, which is outside the objective of the company, so all the external data variables were removed.
+
+## FLAGS
+```{r CVD_2}
+
+# check the FLAG variables
+c1 <- colnames(data1)
+data1a <- data1 %>% select(starts_with("FLAG_"))
+data1a$TARGET <- data1$TARGET
+
+data1a <- dataMutate1(data1a,6)
+
+colnames(data1a) <- sub("FLAG_", "", colnames(data1a))
+
+u2 <- colnames(data1a)
+for (ii in 1:ncol(data1a)) {
+  u<-table(data1a[,ii],data1$TARGET*ii)
+  u[,2]<-round(u[,1]/rowSums(u),3)
+  # suppress output
+  #print(u2[ii])
+  #print(u)
+  ##mymodel<-glm(TARGET~data1a[,ii],data = data1a,family = 'binomial')
+  ##print(summary(#mymodel))
+}
+
+mymodel<-glm(TARGET~.,data = data1a,family = 'binomial')
+print(summary(mymodel))
+VIF(mymodel)
+# everything except FLAG_OVER_REALTY is sensitive
+# not significant: FLAG_OWN_REALTY, FLAG_MOBIL (by itself), FLAG_CONT_MOBILE, FLAG_EMAIL
+
+c <- cor(data1a)
+corrplot(c, method="color", title="Correlation: Flag Variables")
+
+# merge and remove some columns because they're correlated, insensitive, or not significant
+data1 <- dataMutate2(data1,4)
+#dataMutate2(,4) <-- merge similar phone variables
+
+```
+
+The above code looks at the FLAG_* variables. In the data subset, the character variables are transformed into integers to allow the correlation matrix to be calculated. Printing basic (single variable) models (suppressed now), shows that the TARGET is sensitive to most of the variables, though some are not statistically significant. The variables that are not significant or sensitive are removed or merged with others.
+
+## REGION VARIABLES
+```{r CVD_3}
+
+data1a <- data1 %>% select(starts_with("REG"))
+data1a$TARGET <- data1$TARGET
+c2 <- colnames(data1a)
+for (ii in 1:ncol(data1a)) {
+  print(paste(ii,"<--", c2[ii]))
+  colnames(data1a)[ii]<-paste(ii)
+}
+
+e <- cor(data1a)
+
+corrplot(e, method="color", title="Correlation: Region Variables")
+# REGION_RATING_CLIENT_W_CITY is very correlated with REGION_RATING_CLIENT
+# REGION_RATING_CLIENT is negatively correlated with REGION_POPULATION_RELATIVE <-- bias against urban??
+
+data1 <- dataMutate2(data1, 5)
+#dataMutate2(,5) <-- remove correlated region variables
+
+```
+The list printed above corresponds to the indexing of the variables on the correlation chart. Clearly, several pairs of the variables are correlated. Interestingly, the rating of the region that a client lives in is negatively correlated with the population of that region which may be true but also may imply some bias of the people generating the rating against urban areas. These are both kept in the dataset because it is currently unclear which would be better or how the bias should be accounted for.
+
+The region/city_live/work pairs are correlated and the region variables are removed in favor of the city variables
+
+## DAYS VARIABLES
+```{r CVD_4}
+
+data1 <- dataMutate1(data1, 2)
+#dataMutate1(,2) <-- convert all DAYS variables to YEARS variables
+
+data1a <- data1 %>% select(starts_with("YEAR"))
+data1a$TARGET <- data1$TARGET
+# need to remove an NA value (one row)
+data1a <- na.omit(data1a)
+colnames(data1a) <- sub("YEARS_", "", colnames(data1a))
+f <- cor(data1a)
+corrplot(f, method="color", title="Correlation: Time Variables")
+
+set.seed(73)
+data1a1 <- data1a %>%
+  sample_n(10000)
+
+ggplot(data1a1, aes(x = BIRTH, y = EMPLOYED, color=TARGET )) +
+ geom_point() +
+  labs(title="YEARS EMPLOYED vs AGE by TARGET")
+
+mymodel<-glm(TARGET~.,data = data1a,family = 'binomial')
+print(summary(mymodel))
+
+```
+The days variables are transformed into years variables for easier interpretability. All values should be negative to indicate days before the application for the loan. Some values were not negative (for DAYS_EMPLOYED), which indicates an error in the data. When DAYS_EMPLOYED was positive, it was extremely (unrealistically) high, so all positive values in the data were set to zero. YEARS_REGISTRATION is fairly correlated to YEARS_BIRTH and quite insensitive in a preliminary model (approximately an order of magnitude less sensitive than the others), so it is removed.
+
+## General Variables
+```{r CVD_5}
+
+mymodel<-glm(TARGET~WEEKDAY_APPR_PROCESS_START,data = data1,family = 'binomial')
+print(summary(mymodel))
+
+# leaving in for now but want to remove - doesn't seem like it should be predictive
+mymodel<-glm(TARGET~HOUR_APPR_PROCESS_START,data = data1,family = 'binomial')
+print(summary(mymodel))
+
+ggplot(data = data1, aes(x=HOUR_APPR_PROCESS_START, fill=factor(TARGET))) +
+    geom_histogram(aes(y=..density..), breaks=seq(0.5,24.5,1),alpha=0.2, position = 'identity') +
+    #scale_fill_manual(values=c("#E69F00", "#999999")) +
+    scale_fill_manual(values=c("blue", "red")) +
+    labs(title = "Target ~ Hour of Application")
+
+mymodel<-glm(TARGET~WALLSMATERIAL_MODE,data = data1,family = 'binomial')
+print(summary(mymodel))
+
+mymodel<-glm(TARGET~HOUSETYPE_MODE,data = data1,family = 'binomial')
+print(summary(mymodel))
+# may be worth keeping
+
+data1 <- dataMutate2(data1, 6)
+#dataMutate2(,6) <-- remove "other" variables
+
+```
+This section is intended to check general variables that seem to not be predictive. WEEKDAY_APPR_PROCESS_START, WALLSMATERIAL_MODE, HOUR_APPR_PROCESS_START, and HOUSETYPE_MODE are checked. The first two are shown to not be statistically signicant and are removed. The fourth is only partly significant and is left in the dataset as a possible option to be transformed or generalized in the future. Intuitively, HOUR_APPR_PROCESS_START (the time at which the application process starts) would not be predictive of default or not, but the simple model implies that it is somewhat predictive and the normalized histogram shows that clients who start their application in the morning default more frequently than clients who start their application in the afternoon. In the histogram, purple shows an overlap, and red/blue indicate DEFAULT/NO DEFAULT respectively. Because of this, the variable is not removed from the model.
+
+## Character Variables
+```{r CVD_6}
+
+data1 <- dataMutate1(data1, 3)
+data1 <- dataMutate1(data1, 4)
+
+#dataMutate1(,3) <-- group family status, type of group, education, and income type into smaller groups
+#dataMutate1(,4) <-- turn some data into factors
+
+data1a <- data1 %>% select(starts_with("NAME"))
+data1a$TARGET <- data1$TARGET
+colnames(data1a) <- sub("NAME_", "", colnames(data1a))
+
+table(data1a$CONTRACT_TYPE, data1a$TARGET)
+#table(data1a$TYPE_SUITE, data1a$TARGET)
+#table(data1a$INCOME_TYPE, data1a$TARGET)
+#table(data1a$EDUCATION_TYPE, data1a$TARGET)
+#table(data1a$FAMILY_STATUS, data1a$TARGET)
+#table(data1a$HOUSING_TYPE, data1a$TARGET) #possibility to simplify
+
+```
+This section transforms the NAME_* variables into factors and simplifies some variables into smaller groups (e.g. from having five unique values to having three unique values). These groupings were selected to categorize variable answers that were already similar (and possibly open to interpretation by the person filling in the data) into the same value. A table of these unique values for each of the NAME_* variables was printed out - this output was mostly suppressed for the generation of this report. The tables showed sensitivity of each of the possible predictors to the TARGET. In a future step, these variables should be transformed to factors for future model use.
+
+## OCCUPATION and ORGANIZATION
+```{r CVD_7}
+
+data1 <- dataMutate1(data1, 5)
+#dataMutate1(,5) <-- group organizations and occupations into blue or white collar
+
+mymodel<-glm(TARGET~OCCUPATION_TYPE+ORGANIZATION_TYPE,data = data1,family = 'binomial')
+print(summary(mymodel))
+# org type may not be important if occ type is used
+
+a<- data1 %>% 
+  group_by(ORGANIZATION_TYPE,OCCUPATION_TYPE) %>%
+  summarize(mTARG = mean(TARGET))
+
+print("Majority classifier by Occupation and Organization")
+print(spread(a, key = "OCCUPATION_TYPE", value = "mTARG", fill = 0))
+
+a<- data1 %>% 
+  group_by(ORGANIZATION_TYPE,OCCUPATION_TYPE) %>%
+  summarize(tot = n())
+
+print("Number of Datapoints by Occupation and Organization")
+print(spread(a, key = "OCCUPATION_TYPE", value = "tot", fill = 0))
+
+# ORGANIZATION_TYPE is insensitive/overlaps with OCCUPATION_TYPE; FONDKAPREMONT_MODE has an incorrect description and confusing names
+data1 <- dataMutate2(data1,7)
+#dataMutate2(,7) <-- remove additional unusable variables and modify gender and emergency variables into integers
+
+```
+There were many types of organizations and occupations defined within the model. These options were simplified into blue collar/white collar/unknown, to reduce the degrees of freedom of the variable while still maintaining most of the information. The tables printed out shown the percentage of default for each combination of organization and occupation, as well as the number of data points in each cell. The table and the relatively simple model generated show that the organization type is not a driver of default rate - it is more dependent on the client's specific role within the organization, so ORGANIZATION_TYPE is removed from the dataset.
+
+Other variables that are transformed or removed are: CODE_GENDER (changed to ISMALE integer variable), FONDKAPREMONT_MODE (unclear description and name), and EMERGENCYSTATE_MODE (transformed to an integer).
+
+## All Other Variables
+```{r CVD_8}
+
+data1a <- data1 %>% select(starts_with("OBS_"))
+data1a$TARGET <- data1$TARGET
+data1a$CNT_CHILDREN <- data1$CNT_CHILDREN
+data1a$CNT_FAM_MEMBERS <- data1$CNT_FAM_MEMBERS
+data1a$ISMALE <- data1$ISMALE
+data1a$DEF_30_CNT_SOCIAL_CIRCLE <- data1$DEF_30_CNT_SOCIAL_CIRCLE
+data1a$DEF_60_CNT_SOCIAL_CIRCLE <- data1$DEF_60_CNT_SOCIAL_CIRCLE
+data1a$EMERGENCYSTATE_MODE <- data1$EMERGENCYSTATE_MODE
+data1a$HOUR_APPR_PROCESS_START <- data1$HOUR_APPR_PROCESS_START
+data1a$LIVE_CITY_NOT_WORK_CITY <- data1$LIVE_CITY_NOT_WORK_CITY
+data1a$LIVE_REGION_NOT_WORK_REGION <- data1$LIVE_REGION_NOT_WORK_REGION
+data1a$REG_CITY_NOT_LIVE_CITY <- data1$REG_CITY_NOT_LIVE_CITY
+data1a$REG_CITY_NOT_WORK_CITY <- data1$REG_CITY_NOT_WORK_CITY
+
+i <- cor(data1a[,11:14])
+corrplot(i, method="color", title = "Correlation: Live/Work Variables")
+
+#mymodel<-glm(TARGET~REG_CITY_NOT_LIVE_CITY+REG_CITY_NOT_WORK_CITY+LIVE_REGION_NOT_WORK_REGION+LIVE_CITY_NOT_WORK_CITY,data = data1a,family = 'binomial')
+#print(summary(mymodel))
+
+# removed less effective correlated variables
+data1 <-dataMutate2(data1, 8)
+#dataMutate2(,8) <-- remove correlated variables
+
+data1a <- data1a[,1:(ncol(data1a)-4)]
+data1b <- na.omit(data1a)
+j <- cor(data1b)
+corrplot(j, method="color", title = "Correlation: General Variables")
+mymodel<-glm(TARGET~.,data = data1a,family = 'binomial')
+print(summary(mymodel))
+
+#data1b1 <- data1 %>%
+#  sample_n(30000)
+#ggplot(data1b1, aes(x = CNT_CHILDREN, y = CNT_FAM_MEMBERS, color=TARGET )) +
+# geom_point()
+
+# remove correlated and insensitive variables
+data1 <- dataMutate2(data1, 9)
+#dataMutate2(,9) <-- adjust family members to not include children, set NAs to zero, and remove other correlated variables
+
+
+#data1a <- data1a %>%
+#  sample_n(100)
+#pairs.panels(data1a)
+# what about the remaining variables: 3/6/9
+
+```
+The remaining variables are captured and explored in the section above. The first correlation plot shows a strong relationship between several of the variables, so LIVE_REGION_NOT_WORK_REGION and LIVE_CITY_NOT_WORK_CITY are removed. In the second correlation plot, there are several correlated pairs. A model is generated with those predictors and some are removed based on their relative predictive ability. All the SOCIAL_CIRCLE_* variables are correlated, so the three least predictive or significant are removed in preference of DEF_30_CNT_SOCIAL_CIRCLE. The number of family members correlates heavily with the number of children (also intuitive), but they are both significant, so CNT_FAM_MEMBERS is transformed to not include CNT_CHILDREN and then cleaned by setting all NA values to zero.
+
+## Ratio Calculation
+```{r CVD_9}
+
+set.seed(73)
+#data1 <- data1 %>%
+#  sample_n(10000)
+
+#ggplot(data1, aes(x = TARGET, y = FLAG_WORK_PHONE)) +
+# geom_boxplot() +
+#  ylim(-2000,2000)
+
+data1a <- data1 %>%
+  mutate(rat1 = AMT_CREDIT/AMT_INCOME_TOTAL,
+         rat2 = AMT_ANNUITY/AMT_INCOME_TOTAL,
+         rat3 = AMT_ANNUITY/AMT_CREDIT,
+         rat4 = AMT_CREDIT/AMT_GOODS_PRICE,
+         rat5 = AMT_INCOME_TOTAL/(CNT_FAM_MEMBERS+CNT_CHILDREN))
+# per capita income or income ratio?
+
+mymodel<-glm(TARGET~scale(AMT_CREDIT)+scale(AMT_INCOME_TOTAL)+scale(AMT_ANNUITY)+scale(AMT_GOODS_PRICE)+rat1+rat2+rat3+rat4+rat5,data = data1a,family = 'binomial')
+print(summary(mymodel))
+
+
+ggplot(data1a, aes(x = rat4, col = factor(TARGET)))+
+  #geom_density() +
+  stat_ecdf(geom = "step") + 
+  theme_minimal() +
+  labs(title = "Density plot of AMT_CREDIT/AMT_GOODS_PRICE by TARGET") +
+  xlim(1, 3)
+#xlim(0, 1e6)
+
+```
+The section above creates several financial ratios and then tested in a model. Some of these are significant and could be used in a more final model, but others are ineffective predictors and will not be used. For example, rat4 (AMT_CREDIT/AMT_GOODS_PRICE) is typically lower for clients who do not default, which is an intuitive answer confirmed by the chart.
+
+## Additional Dataset Summary Creation
+```{r CVD_10}
+
+a1 = data.frame(matrix(nrow = 0, ncol = 1))
+colnames(a1) <- c("ID")
+e <- c(1:3,6,12)
+for (kk in 1:length(e)) {
+  data4b <- data4[data4[,"MONTHS_BALANCE"]==-e[kk],]
+  a2 <- aggregate(data4b$AMT_BALANCE, by=list(Category=data4b$SK_ID_CURR), FUN=sum)
+  colnames(a2) <- c("ID",paste("Month",e[kk], sep = ""))
+  #if (kk==1) {
+  #  a1 <- a2
+  #} else {
+    a1 <- merge(a1,a2,by="ID",all=TRUE)
+  #}
+}
+
+# need rate of change of balance compared to credit limit
+
+```
+The section above determines the credit balance for a client at 1, 3, 6, and 12 month intervals prior to the loan application. This data may be used in the future to generate more predictors to improve the accuracy of the model. 
+
+## Current Status
+```{r CVD_11}
+summary(data1)
+```
+The summary at this point in time shows a very high value for AMT_INCOME_TOTAL. This may be true but should be explored and confirmed to make sure this isn't an error in the application or data entry. There are some NAs (very low percentage) for AMT_ANNUITY, AMT_GOODS_PRICE, DEF_30_CNT_SOCIAL_CIRCLE, and YEARS_LAST_PHONE_CHANGE. These values will likely be imputed, but may be removed since they are such a low percentage.
+
+Results: the remaining variables in the dataset show promise in predicting the target variable. The subjective variables allow a large amount of client-discretion, which make the interpretation less certain. These variables could be simplified by an analyst to be more generalizable to future situations. If this is done, rules should be defined to allow repeatability in the future, and ideally the implementation should be as automated as possible.
+
+
+
+## Model Test
+``` {r}
+#c("ACC","PRECISION","TPR","F1")
+genLMmodel <- function(data, split, thresh, option) {
+  sum <- data.frame(matrix(ncol = 5, nrow = 0))
+  colnames(sum) <- c("TrainSplit","Thresh","Train","ACC","TPR")
+  set.seed(73)
+  
+  ds1 <- createDataPartition(data$TARGET, p = split, list=FALSE)
+  trainData <- data[ds1,]
+  if (option==2) {
+    trainDat1 <- trainData %>% filter(TARGET==0)
+    trainDat2 <- trainData %>% filter(TARGET==1)
+    
+    trainData <- rbind(trainDat1,trainDat2,trainDat2,
+                       trainDat2,trainDat2,trainDat2,
+                       trainDat2,trainDat2)
+  }
+    trainDataIn <- trainData %>%
+      subset(select = -c(TARGET))
+    trainDataOut <- trainData %>%
+      subset(select = c(TARGET))
+    
+  testData <- data[-ds1,]
+    testDataIn <- testData %>%
+      subset(select = -c(TARGET))
+    testDataOut <- testData %>%
+      subset(select = c(TARGET))
+
+  
+  if (option==1) {
+    model <- glm(trainDataOut$TARGET~.,data = trainDataIn,family = 'binomial')
+  } else if (option==2) {
+    model <- ranger(trainDataOut$TARGET~., data = trainDataIn,
+                    num.trees = 50, importance = 'impurity')
+  }
+
+  trainPred <- predict(model, data=trainDataIn, type ="response")
+  if (option==2) {
+    trainPred <- trainPred$predictions
+  }
+  
+  trainPredBinary <- ifelse(trainPred > thresh,1,0)
+  t <- table(trainDataOut$TARGET,trainPredBinary)
+  if (ncol(t)<2) {
+    t <- cbind(t,c(0,0))
+    colnames(t) <- c("0","1")
+  }
+  #print(t)
+  acc <- round((t[2,2]+t[1,1])/sum(t),3)
+  tpr <- round(t[2,2]/(t[2,2]+t[2,1]),3)
+  sum[1,] <- c(100*split,100*thresh,TRUE,acc,tpr)
+
+  
+  
+  if (option==1) {
+    testPred <- predict(model, newdata=testDataIn, type ="response")
+  } else if (option==2) {
+    testPred <- predict(model, data=testDataIn, type ="response")
+    testPred <- testPred$predictions
+  }
+  
+  testPredBinary <- ifelse(testPred > thresh,1,0)
+  t <- table(testDataOut$TARGET,testPredBinary)
+  if (ncol(t)<2) {
+    t <- cbind(t,c(0,0))
+    colnames(t) <- c("0","1")
+  }
+  #print(t)
+  acc <- round((t[2,2]+t[1,1])/sum(t),3)
+  tpr <- round(t[2,2]/(t[2,2]+t[2,1]),3)
+  sum[2,] <- c(100*split,100*thresh,FALSE,acc,tpr)
+  
+  print(sum)
+}
+
+data1 <- dataMutate1(data1,7)
+
+set.seed(37)
+ds2 <- createDataPartition(data1$TARGET, p = 0.1, list=FALSE)
+dataTM <- data1[ds2,]
+
+for (ii in c(0.70,0.75,0.80)) {
+  for (jj in c(0.05,0.10,0.25)) {
+    genLMmodel(dataTM,ii,jj,1)
+  }
+}
+
+for (ii in c(0.70,0.75,0.80)) {
+  genLMmodel(dataTM,ii,0.1,2)
+}
+
+
+```
+
+
+## Kaggle Guess Generation
+``` {r}
+
+genKaggleInput <- function(data, option, testData) {
+  set.seed(73)
+  
+  if (option==2) {
+    data1 <- data %>% filter(TARGET==0)
+    data2 <- data %>% filter(TARGET==1)
+    
+    data <- rbind(data1,data2,data2,
+                  data2,data2,data2,
+                  data2,data2)
+  }
+  
+  dataIn <- data %>%
+      subset(select = -c(TARGET))
+  dataOut <- data %>%
+      subset(select = c(TARGET))
+  
+  if (option==1) {
+    model <- glm(dataOut$TARGET~.,data = dataIn,family = 'binomial')
+  } else if (option==2) {
+    model <- ranger(trainDataOut$TARGET~., data = trainDataIn,
+                    num.trees = 50, importance = 'impurity')
+  }
+
+  if (option==1) {
+    testPred <- predict(model, newdata=testData, type ="response")
+  } else if (option==2) {
+    testPred <- predict(model, data=testData, type ="response")
+    testPred <- testPred$predictions
+  }
+  
+  # RANGER: with Shane's data
+    #model <- ranger(train_labels~., data = train_data,
+    #                num.trees = 50, importance = 'impurity')
+    #testPred <- predict(model, data = test_cleaned2, type ="response")
+    #testPred <- testPred$predictions
+    
+  # LM: with Shane's data
+    #model <- glm(train_labels~.,data = train_data,family = 'binomial')
+    #testPred <- predict(model, newdata = test_cleaned2, type ="response")
+  
+
+  submission <- testData %>% 
+    select(SK_ID_CURR) %>% 
+    mutate(TARGET = testPred)
+  
+  write.csv(submission, "submission.csv")
+}
+
+data1 <- dataMutate1(data1,7)
+
+data2 <- data2 %>%
+  subset(select = -c(COMMONAREA_AVG, COMMONAREA_MODE, COMMONAREA_MEDI,
+                     NONLIVINGAPARTMENTS_AVG, NONLIVINGAPARTMENTS_MODE,
+                     NONLIVINGAPARTMENTS_MEDI, LIVINGAPARTMENTS_AVG,
+                     LIVINGAPARTMENTS_MODE, LIVINGAPARTMENTS_MEDI,
+                     FLOORSMIN_AVG, FLOORSMIN_MODE, FLOORSMIN_MEDI,
+                     YEARS_BUILD_AVG, YEARS_BUILD_MODE, YEARS_BUILD_MEDI,
+                     OWN_CAR_AGE, LANDAREA_AVG, LANDAREA_MODE, LANDAREA_MEDI,
+                     BASEMENTAREA_AVG, BASEMENTAREA_MODE, BASEMENTAREA_MEDI,
+                     EXT_SOURCE_1, NONLIVINGAREA_AVG, NONLIVINGAREA_MODE,
+                     NONLIVINGAREA_MEDI, ELEVATORS_AVG, ELEVATORS_MODE,
+                     ELEVATORS_MEDI, APARTMENTS_AVG, APARTMENTS_MODE,
+                     APARTMENTS_MEDI, ENTRANCES_AVG, ENTRANCES_MODE,
+                     ENTRANCES_MEDI, LIVINGAREA_AVG, LIVINGAREA_MODE,
+                     LIVINGAREA_MEDI, FLOORSMAX_AVG, FLOORSMAX_MODE,
+                     FLOORSMAX_MEDI, YEARS_BEGINEXPLUATATION_AVG,
+                     YEARS_BEGINEXPLUATATION_MODE, YEARS_BEGINEXPLUATATION_MEDI,
+                     TOTALAREA_MODE))
+
+    data2 <- dataMutate1(data2, 0)
+    data2 <- dataMutate1(data2, 1)
+data2 <- dataMutate2(data2, 1)
+data2 <- dataMutate2(data2, 2)
+data2 <- dataMutate2(data2, 3)
+data2 <- dataMutate2(data2, 4)
+data2 <- dataMutate2(data2, 5)
+    data2 <- dataMutate1(data2, 2)
+data2 <- dataMutate2(data2, 6)
+    data2 <- dataMutate1(data2, 3)
+    data2 <- dataMutate1(data2, 4)
+    data2 <- dataMutate1(data2, 5)
+data2 <- dataMutate2(data2, 7)
+data2 <- dataMutate2(data2, 8)
+data2 <- dataMutate2(data2, 9)
+    data2 <- dataMutate1(data2, 7)
+    
+genKaggleInput(data1, 1, data2)
+genKaggleInput(data1, 2, data2)
+
+
+```
+
