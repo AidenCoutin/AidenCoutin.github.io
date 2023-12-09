@@ -7,7 +7,7 @@ The Kaggle competition located [here](https://kaggle.com/competitions/home-credi
 The objective of this project was to develop a method to predict the risk of default of a person without a credit score. This was a supervised classification problem. The target variable is whether a client would have payment difficulties over an initial time period of the loan. 
 
 # Solution
-My EDA focused on processing incomplete datasets (with NAs), correcting errors with the data, and integrating variables where it made sense to simplify the model development process in the future. 
+My [EDA](https://github.com/AidenCoutin/AidenCoutin.github.io/blob/main/IS_6812/Capstone_EDA_AC.Rmd) focused on processing incomplete datasets (with NAs), correcting errors with the data, and integrating variables where it made sense to simplify the model development process in the future. 
 
 The team ended with a boosted decision tree model with good out-of-sample performance that scored well (0.76) on the Kaggle competition's metrics. We found that there was a significant (intuitive) tradeoff between risk to the company and inclusivity that the company would provide. The chart below summarizes this sensitivity.
 
