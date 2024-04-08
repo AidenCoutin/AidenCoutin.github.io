@@ -1,0 +1,590 @@
+---
+title: "Project"
+author: "Aiden Coutin" 
+date: "2024-02-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(caret)
+library(rminer)
+Sys.setenv('JAVA_HOME'="C:\\Program Files\\Java\\jre-1.8") 
+library(RWeka)
+library(kernlab)
+library(matrixStats)
+library(knitr)
+
+
+
+setwd("C:\\Users\\amcou\\Documents\\GradSchool\\Classes\\S4 Spring 2024\\Capstone 3\\Assignments\\UoU_MSBA")
+
+if (FALSE) {
+  fil1 <- "FACT_MARKET_DEMAND.csv"
+  sdf <- read.csv(fil1)
+  
+  sdf <- sdf %>%
+    mutate(CALORIC_SEGMENT = ifelse(CALORIC_SEGMENT=="","REGULAR",CALORIC_SEGMENT))
+  
+  gc()
+  ddf  <- read.csv('dateDiff1.csv')
+  ddf2 <- read.csv('dateDiff2.csv')
+  ddf3 <- read.csv('dateDiff3.csv')
+  ddf4 <- read.csv('dateDiff4.csv')
+  ddf5 <- read.csv('dateDiff5.csv')
+  ddf6 <- read.csv('dateDiff6.csv')
+  
+  ddf <- rbind(ddf,ddf2)
+  rm(ddf2)
+  ddf <- rbind(ddf,ddf3)
+  rm(ddf3)
+  ddf <- rbind(ddf,ddf4)
+  rm(ddf4)
+  ddf <- rbind(ddf,ddf5)
+  rm(ddf5)
+  ddf <- rbind(ddf,ddf6)
+  rm(ddf6)
+  
+  sdf <- cbind(sdf,ddf[,3])
+  rm(ddf)
+  t1 <- colnames(sdf)
+  t1[11] <- 'nDays'
+  colnames(sdf) <- t1
+  gc()
+  
+  sdf3 <- sdf %>%
+    group_by(ITEM,MARKET_KEY,PACKAGE,BRAND,CALORIC_SEGMENT) %>%
+    summarize(PACKAGE=first(PACKAGE),
+              totalUnitSales=sum(UNIT_SALES),
+              totalDollarSales=sum(DOLLAR_SALES),
+              MARKET_KEY=first(MARKET_KEY),
+              CALORIC_SEGMENT=first(CALORIC_SEGMENT),
+              CATEGORY=first(CATEGORY),
+              MANUFACTURER=first(MANUFACTURER),
+              BRAND=first(BRAND),
+              ITEM=first(ITEM),
+              timeLength=max(nDays)-min(nDays),
+              day1=first(nDays))
+  
+  rm(sdf)
+  write.csv(sdf3,'groupDF.csv')
+  rm(sdf3)
+  gc()
+}
+
+fil1 <- "groupDF.csv"
+sdf_g <- read.csv(fil1)
+
+sdf_g <- sdf_g %>%
+  subset(select = -c(X)) # remove indexing var
+
+sdf_g <- sdf_g %>%
+  mutate(
+    #PACKAGE = factor(PACKAGE),
+         BRAND = factor(BRAND),
+         CALORIC_SEGMENT = factor(CALORIC_SEGMENT),
+         CATEGORY = factor(CATEGORY),
+         MANUFACTURER = factor(MANUFACTURER))
+
+
+sdf_g5 <- sdf_g %>%
+    group_by(ITEM) %>%
+      summarize(UNIT_SALES = sum(totalUnitSales))
+#write.csv(sdf_g5,'uniqueItems.csv')
+
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('  ',' ',ITEM, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('JUG','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('1','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('8','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('CONTOUR','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('WRAP','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('LIQUID','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('2','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('9','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('CONTAINER','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('SMALL','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('3','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('PER','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('TRAY','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub(' X','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('4','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('CALORIES','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('IN','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('CUP','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('5','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('LOW','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('.','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('6','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('PER','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('0','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('7','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('PPR','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub(' CL ','',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% mutate(ITEM2 = trimws(gsub('RED RED','RED',ITEM2, fixed=TRUE)))
+sdf_g5 <- sdf_g5 %>% subset(select = -c(UNIT_SALES))
+
+#write.csv(sdf_g5,'uniqueItems2.csv')
+
+gc()
+sdf_g <- sdf_g %>%
+  left_join(sdf_g5, by = "ITEM")
+
+sdf_g <- sdf_g %>% subset(select = -c(ITEM))
+t1 <- colnames(sdf_g)
+t1[length(t1)] <- "ITEM"
+colnames(sdf_g) <- t1
+rm(sdf_g5)
+
+
+d <- read.csv('wordList.csv')
+d <- d$d
+nC <- ncol(sdf_g)
+
+# sort d by descending length of word
+x <- nchar(d)
+d <- d[order(-x)]
+
+t1 <- colnames(sdf_g)
+for (ii in 1:length(d)) {
+  sdf_g[,nC+ii] <- 0
+  sdf_g[grep(d[[ii]], sdf_g$ITEM),nC+ii] <- 1
+  sdf_g$ITEM <- gsub(d[[ii]],"",sdf_g$ITEM) # remove word from ITEM
+  t1 <- c(t1,d[[ii]])
+}
+
+colnames(sdf_g) <- t1
+
+sdf_g <- sdf_g %>%
+  mutate(COFFEE = ifelse(COFFEE+COFFEA>=1,1,0),
+         ENERGY = ifelse(ENERGY+ENRGY>=1,1,0),
+         KULA = ifelse(KULA+KOLA>=1,1,0),
+         TROPPY = ifelse(TROPPY+TROPICAL>=1,1,0),
+         RED = ifelse(RED+ROJO>=1,1,0),
+         SANGRIA = ifelse(SANGRIA+SANGRITA>=1,1,0)) %>%
+  subset(select = -c(COFFEA,ENRGY,KOLA,TROPICAL,ROJO,SANGRITA))
+
+# remove outdated variables, and those without enough occurrences
+a<-colSums(sdf_g[,12:ncol(sdf_g)])
+threshPerc = 0.05 # this is 0.05% min frequency required
+sdf_g <- subset(sdf_g, select=setdiff(names(sdf_g),
+                                      names(a[a<threshPerc/100*nrow(sdf_g)])))
+
+cNs <- colnames(sdf_g)
+for (ii in 12:length(cNs)) {
+  sdf_g[,ii] <- as.factor(sdf_g[,ii])
+} # turn all one-hots into factors
+
+#-----------------
+market_data <- read_csv("zip_to_market_unit_mapping.csv")
+consumer_demographics <- read_csv("demo_data.csv")
+
+market_data <- rename(market_data, Zip = ZIP_CODE)
+
+joined_data <- left_join(consumer_demographics, market_data, by = "Zip")
+
+# Define the mappings of state abbreviations to regions
+northern_states <- c("ME", "NH", "VT", "MA", "RI", "CT", "NY", "NJ", "PA", 
+                     "OH", "MI", "IN", "WI", "IL", "MN", "IA", "MO", "ND", 
+                     "SD", "NE", "KS")
+southern_states <- c("MD", "DE", "WV", "VA", "KY", "NC", "SC", "TN", "GA", 
+                     "AL", "MS", "AR", "LA", "FL", "TX", "OK")
+
+southwest_states <- c("AZ", "NM", "NV")
+
+# Function to determine the region based on state abbreviation
+get_region <- function(state_abbr) {
+  if (state_abbr %in% northern_states) {
+    return("Northern")
+  } else if (state_abbr %in% southern_states) {
+    return("Southern")
+  } else if (state_abbr %in% southwest_states) {
+    return("Southwest")
+  } else {
+    return("Western") 
+    # Defaulting to Western for states not included in the other lists
+  }
+}
+
+joined_data$Region <- sapply(joined_data$State, get_region) 
+
+joined_data_unique <- joined_data %>%
+  distinct(MARKET_KEY, .keep_all = TRUE)
+
+rm(joined_data)
+rm(consumer_demographics)
+rm(market_data)
+
+sdf_g <- sdf_g %>%
+  left_join(joined_data_unique[, c("MARKET_KEY", "Region")], by = "MARKET_KEY")
+
+rm(joined_data_unique)
+
+sdf_g <- sdf_g %>%
+  mutate(Region = factor(Region)) %>%
+  subset(select = -c(MARKET_KEY))
+
+#---------------------
+
+while (max(sdf_g$day1)>=365) {
+  sdf_g <- sdf_g %>% 
+    mutate(day1 = ifelse(day1>=365,day1-365,day1))
+}
+
+sdf_stor <- sdf_g
+
+head(sdf_g[,c(1:10,97)])
+summary(sdf_g[,c(1:10,97)])
+
+sdf_g <- sdf_g %>% 
+    mutate(day1 = factor(day1))
+
+# remove all products sold for under a week and all products sold for more than 151 weeks (capped data likely)
+sdf_g <- sdf_g %>%
+  filter(timeLength>0) # removes 12061 rows
+
+sdf_g <- sdf_g %>%
+  filter(timeLength<151*7) # removes 102089 rows
+
+# change low-occurence of PACKAGE values to "ALL OTHER ONES"
+t1 <- table(sdf_g$PACKAGE)
+sdf_g$PACKAGE[sdf_g$PACKAGE %in% names(t1[t1<10])] <- "ALL OTHER ONES"
+sdf_g <- sdf_g %>% 
+  mutate(PACKAGE=as.factor(PACKAGE))
+
+
+sdf_g <- sdf_g %>%
+  subset(select = -c(ITEM,totalDollarSales))
+  # ITEM superseded by oneHots
+  # total dollar sales an alternate target variable (correlated)
+
+sdf_g <- sdf_g %>%
+  subset(select = -c(BRAND))
+  # BRAND initially seems insensitive
+
+# test unit sales per day
+sdf_g2 <- sdf_g %>%
+  mutate(tUSpD = totalUnitSales/(timeLength+1)) %>%
+  subset(select = -c(totalUnitSales,timeLength))
+
+sdf_g <- sdf_g %>%
+  subset(select = -c(SUNRISE,FUJI,APPLE,ROSALIA,MANDARIN,CRAN,
+                     AGUA,JUICY,CARAMEL,ROSA,BLUE,JASMINA,
+                     UNFLAVORED,SILVER,PACIFIC,MULBERRIES,
+                     WOODSY,SANGRIA,BEER)) #insensitive
+
+sdf_g <- sdf_g %>%
+  subset(select = -c(PIE,ALE,KULA,VIOLET,`PAPI-COLA`,ENERGY,
+                     PEPPER,COTTON,STRAWBER,PINA,COLADA,
+                     GINGERBREAD,EXPLOSIONERINE)) #insensitive
+
+sdf_g <- sdf_g %>%
+  subset(select = -c(CASAVA,APRICOT,GEM,RAZ,BING,LYMONADE,COFFEE,SORBET)) #insensitive
+
+# should package be kept?
+m1 <- glm(totalUnitSales ~ ., data=sdf_g)
+print(summary(m1))
+
+#sdf_g <- sdf_g %>% subset(select = -c(PACKAGE))
+
+set.seed(73)
+ds1 <- createDataPartition(sdf_g$totalUnitSales, p = 0.80, list=FALSE)
+train1targ <- sdf_g[ds1,]  %>% pull(c(totalUnitSales))
+train1pred <- sdf_g[ds1,]  %>% select(-c(totalUnitSales))
+test1targ  <- sdf_g[-ds1,] %>% pull(c(totalUnitSales))
+test1pred  <- sdf_g[-ds1,] %>% select(-c(totalUnitSales))
+
+m1 <- glm(train1targ ~ ., data = train1pred)
+pred1train <- predict(m1, data = train1pred)
+pred1test  <- predict(m1, newdata = test1pred)
+
+mtrcs <- c("MAE", "RMSE", "R2")
+
+print("Model 1 Metrics")
+print("Training")
+print(mmetric(train1targ,pred1train,mtrcs))
+
+print("Testing")
+print(mmetric(test1targ,pred1test,mtrcs))
+
+
+# ---------------
+sdf_g2 <- sdf_g2 %>%
+  subset(select = -c(NECTARINE,APPLE,RAZZBERRY,SUNRISE,SORBET,
+                     BISCUS,CUSTARD,JUNEBERRY)) #insensitive
+
+sdf_g2 <- sdf_g2 %>%
+  subset(select = -c(TROPPY,FUJI,PEPPER,SANGRIA,DIETARY,ROSA,
+                     BURUNDI,CORN,DREAMS,PACIFIC,KULA)) #insensitive
+
+sdf_g2 <- sdf_g2 %>%
+  subset(select = -c(BANANAS,BLOSSOM,AMBER,GUAVA,PILAVO,COFFEE,
+                     BEACH,DREAMSICLE,RAZ,CRAN,GOLDEN,VIOLET,FIG)) #insensitive
+
+sdf_g2 <- sdf_g2 %>%
+  subset(select = -c(RAZZ,JASMINA,APRICOT,SOUR)) #insensitive
+
+# DEBATABLE TO KEEP PACKAGES?
+
+m2 <- glm(tUSpD ~ ., data=sdf_g2)
+print(summary(m2))
+
+
+set.seed(73)
+ds2 <- createDataPartition(sdf_g2$tUSpD, p = 0.80, list=FALSE)
+train2targ <- sdf_g2[ds2,]  %>% pull(c(tUSpD))
+train2pred <- sdf_g2[ds2,]  %>% select(-c(tUSpD))
+test2targ  <- sdf_g2[-ds2,] %>% pull(c(tUSpD))
+test2pred  <- sdf_g2[-ds2,] %>% select(-c(tUSpD))
+
+m2 <- glm(train2targ ~ ., data = train2pred)
+pred2train <- predict(m2, data = train2pred)
+pred2test  <- predict(m2, newdata = test2pred)
+
+print("Model 2 Metrics")
+print("Training")
+print(mmetric(train2targ,pred2train,mtrcs))
+
+print("Testing")
+print(mmetric(test2targ,pred2test,mtrcs))
+
+
+```
+
+``` {r}
+
+sdf_q2 <- sdf_g %>%
+  #filter(AVOCADO==1) %>%
+    filter(CATEGORY=="SSD")%>% filter(CALORIC_SEGMENT=="REGULAR")
+
+sdf_q2 <- sdf_q2 %>% 
+  subset(select = -c(CATEGORY,CALORIC_SEGMENT))
+  # subset(select = -c(AVOCADO,CATEGORY,CALORIC_SEGMENT))
+
+#increment weeks until demand drops off?
+#demand in weeks two weeks prior to / post easter
+
+xr <- c()
+for (ii in 8:(ncol(sdf_q2)-1)) {
+  t1 <- table(sdf_q2[,ii])
+  if (t1[2]==0) {
+    xr <- c(xr,ii)
+  }
+}
+sdf_q2 <- sdf_q2 %>%
+  subset(select = -xr)
+
+
+sdf_q2 <- sdf_q2 %>%
+  subset(select = -c(APPLE,ROSALIA,
+                     JUICY,BLUE,
+                     UNFLAVORED,MULBERRIES,
+                     WOODSY,SANGRIA,BEER)) #insensitive
+
+sdf_q2 <- sdf_q2 %>%
+  subset(select = -c(ALE,KULA,`PAPI-COLA`,ENERGY,
+                     COTTON,COLADA)) #insensitive
+
+sdf_q2 <- sdf_q2 %>%
+  subset(select = -c(CASAVA,GEM,LYMONADE)) #insensitive
+
+
+set.seed(73)
+ds3 <- createDataPartition(sdf_q2$totalUnitSales, p = 0.80, list=FALSE)
+train3targ <- sdf_q2[ds3,]  %>% pull(c(totalUnitSales))
+train3pred <- sdf_q2[ds3,]  %>% select(-c(totalUnitSales))
+test3targ  <- sdf_q2[-ds3,] %>% pull(c(totalUnitSales))
+test3pred  <- sdf_q2[-ds3,] %>% select(-c(totalUnitSales))
+
+# ---   kNN
+m3b <- IBk(train3targ ~ ., 
+           data = train3pred, 
+           control = Weka_control(K=6, I=FALSE, X=FALSE))
+
+#set.seed(73)
+#sdf_q2x <- sdf_q2 %>% filter(Region=="Northern")
+#sdf_q2x <- sdf_q2 %>% filter(Region=="Southwest")
+#sdf_q2x <- sdf_q2 %>% filter(Region=="Western")
+#ds3x <- createDataPartition(sdf_q2x$totalUnitSales, p = 0.80, list=FALSE)
+#train3targ <- sdf_q2x[ds3x,]  %>% pull(c(totalUnitSales))
+#train3pred <- sdf_q2x[ds3x,]  %>% select(-c(totalUnitSales))
+#test3targ  <- sdf_q2x[-ds3x,] %>% pull(c(totalUnitSales))
+#test3pred  <- sdf_q2x[-ds3x,] %>% select(-c(totalUnitSales))
+#m3b3 <- IBk(train3targ ~ ., 
+#           data = train3pred, 
+#           control = Weka_control(K=20, I=TRUE, X=FALSE))
+
+# I: weight votes by similarity (1/dist)
+# W: weight votes by similarity (1-dist)
+# X: test 1:K fits
+
+
+pred3btrain <- predict(m3b, train3pred)
+pred3btest  <- predict(m3b, test3pred)
+
+print("Model 3b Metrics")
+print("Training")
+print(mmetric(train3targ,pred3btrain,mtrcs))
+
+print("Testing")
+print(mmetric(test3targ,pred3btest,mtrcs))
+
+q2 <- test3pred %>%
+  filter(PACKAGE=="")
+
+q2[1,'PACKAGE'] <- "ALL OTHER ONES"
+q2[1,'CALORIC_SEGMENT'] <- "REGULAR"
+q2[1,'CATEGORY'] <-  "SSD"
+q2[1,'MANUFACTURER'] <- "SWIRE-CC"
+q2[1,'BRAND'] <- "Sparkling Jacceptabletlester"
+q2[1,c(7:22)] <- 0
+q2[1,'AVOCADO'] <- 1
+
+
+columns= c("Region","day1","timeLength","totalUnitSales") 
+modPred = data.frame(matrix(nrow = 0, ncol = length(columns))) 
+colnames(modPred) = columns
+
+ct <- 0
+for (ii in 1:3) {
+  if (ii==1) {
+    q2[1,'Region'] <- "Northern"
+  } else if (ii==2) {
+    q2[1,'Region'] <- "Southwest" 
+  } else {
+    q2[1,'Region'] <- "Western"
+  }
+  for (jj in 1:2) {
+    if (jj==1) {
+      q2[1,'day1'] <- 7*(13-2)
+    } else {
+      q2[1,'day1'] <- 7*(13+2)
+    }
+    for (kk in 1:10) {
+      q2[1,'timeLength'] <- kk*5
+
+      ct <- ct+1
+      columns= c("","","","") 
+      modPred[ct,"Region"] <- q2[1,'Region']
+      modPred[ct,"day1"] <- q2[1,'day1']
+      modPred[ct,"timeLength"] <- q2[1,'timeLength']
+      
+      if (ii==1) {
+        modPred[ct,"totalUnitSales"] <- predict(m3b1, q2)
+      } else if (ii==2) {
+        modPred[ct,"totalUnitSales"] <- predict(m3b2, q2)
+      } else {
+        modPred[ct,"totalUnitSales"] <- predict(m3b3, q2)
+      }
+      
+      
+    }
+  }
+}
+
+
+
+# iterate on timeLength for two possible day1s
+# iterate on region?
+
+#m3 <- glm(train3targ ~ ., data = train3pred)
+#pred3train <- predict(m3, data = train3pred)
+#pred3test  <- predict(m3, newdata = test3pred)
+
+#print("Model 3 Metrics")
+#print("Training")
+#print(mmetric(train3targ,pred3train,mtrcs))
+
+#print("Testing")
+#print(mmetric(test3targ,pred3test,mtrcs))
+
+
+
+
+
+#cross_val(sdf_q2, "totalUnitSales", 1, 73, 7, mtrcs)
+
+
+# try without one-hot data
+sdf_q2b <- sdf_q2[,c(1:7,24)]
+
+set.seed(73)
+ds4 <- createDataPartition(sdf_q2b$totalUnitSales, p = 0.80, list=FALSE)
+train3dtarg <- sdf_q2b[ds4,]  %>% pull(c(totalUnitSales))
+train3dpred <- sdf_q2b[ds4,]  %>% select(-c(totalUnitSales))
+test3dtarg  <- sdf_q2b[-ds4,] %>% pull(c(totalUnitSales))
+test3dpred  <- sdf_q2b[-ds4,] %>% select(-c(totalUnitSales))
+
+m3d <- IBk(train3dtarg ~ ., 
+           data = train3dpred, 
+           control = Weka_control(K=10, I=FALSE, X=TRUE))
+# I: weight votes by similarity (1/dist)
+# W: weight votes by similarity (1-dist)
+# X: test 1:K fits
+
+
+pred3dtrain <- predict(m3d, train3dpred)
+pred3dtest  <- predict(m3d, test3dpred)
+  
+print("Model 3d Metrics")
+print("Training")
+print(mmetric(train3dtarg,pred3dtrain,mtrcs))
+
+print("Testing")
+print(mmetric(test3dtarg,pred3dtest,mtrcs))
+
+
+
+# -----------
+# 1, "polydot"
+#10, "polydot"
+m3c <- ksvm(train3targ ~ ., data = train3pred,
+              kernel="polydot", C=5)
+
+pred3ctrain <- predict(m3c, train3pred)
+pred3ctest  <- predict(m3c, test3pred)
+  
+print("Model 3c Metrics")
+print("Training")
+print(mmetric(train3targ,pred3ctrain,mtrcs))
+
+print("Testing")
+print(mmetric(test3targ,pred3ctest,mtrcs))
+
+# ------------
+
+
+sdf_2q2 <- sdf_g2 %>%
+  filter(AVOCADO==1) %>%
+    filter(CATEGORY=="SSD") %>%
+      filter(CALORIC_SEGMENT=="REGULAR")
+
+sdf_2q2 <- sdf_2q2 %>% 
+  subset(select = -c(AVOCADO,CATEGORY))
+
+set.seed(73)
+ds4 <- createDataPartition(sdf_2q2$tUSpD, p = 0.80, list=FALSE)
+train4targ <- sdf_2q2[ds4,]  %>% pull(c(tUSpD))
+train4pred <- sdf_2q2[ds4,]  %>% select(-c(tUSpD))
+test4targ  <- sdf_2q2[-ds4,] %>% pull(c(tUSpD))
+test4pred  <- sdf_2q2[-ds4,] %>% select(-c(tUSpD))
+
+m4b <- IBk(train4targ ~ ., 
+           data = train4pred, 
+           control = Weka_control(K=40, I=FALSE, X=TRUE))
+pred4train <- predict(m4b, data = train4pred)
+pred4test  <- predict(m4b, newdata = test4pred)
+
+print("Model 4 Metrics")
+print("Training")
+print(mmetric(train4targ,pred4train,mtrcs))
+
+print("Testing")
+print(mmetric(test4targ,pred4test,mtrcs))
+
+
+```
+
