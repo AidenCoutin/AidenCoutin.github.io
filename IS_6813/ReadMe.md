@@ -1,26 +1,22 @@
 # Introduction
-This project was intended to provide an introduction to a complete data science project from start to finish. The initial EDA and modeling was done individually and then groups were formed to enhance the modeling and develop a final product. Only the individual work is loaded in the repository.
-
-The Kaggle competition located [here](https://kaggle.com/competitions/home-credit-default-risk) was used.
+This project involved using real-life data to address company's business problem / series of questions. The EDA was individual work, and I contributed distinct elements to the modeling and postprocessing efforts. Only the individual work is loaded in the repository.
 
 # Summary
-The objective of this project was to develop a method to predict the risk of default of a person without a credit score. This was a supervised classification problem. The target variable is whether a client would have payment difficulties over an initial time period of the loan. 
+The objective of this project was to develop a method to predict product demand over short windows of time (weeks).
 
 # Solution
-My [EDA](https://github.com/AidenCoutin/AidenCoutin.github.io/blob/main/IS_6812/Capstone_EDA_AC.Rmd) focused on processing incomplete datasets (with NAs), correcting errors with the data, and integrating variables where it made sense to simplify the model development process in the future. 
+My [EDA](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/EDA_summary.Rmd) focused on using the flavors derived from the ITEM variable in the dataset to predict demand. The flavors (key terms) were derived from the ITEM variable using [this](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/EDA_ITEM.Rmd) script. This code section ([here](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/snippet_1.R)) was used to remove PACKAGE descriptions from ITEM to aggregation on the ITEM variable in a simpler and more correct fashion. 
 
-The team ended with a boosted decision tree model with good out-of-sample performance that scored well (0.76) on the Kaggle competition's metrics. We found that there was a significant (intuitive) tradeoff between risk to the company and inclusivity that the company would provide. The chart below summarizes this sensitivity.
+One of my post-processing steps was to derive a normal distribution of the prediction levels from the model, and analyze that output to determine the optimal production recommendation for the company. The methodology applied is included [here]((https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/OptimalProduction.Rmd).
 
-<img src="sensitivity.jpg?raw=true" width="404" height="242"/>
-Fig. 1: Sensitivity of Some Parameters to Prediction Threshold
+<img src="ProbDist.png?raw=true" width="404" height="242"/>
+Fig. 1: Probability Distribution of Demand, and Production Recommendations for Various Overage/Underage Cost Ratios
 
 # Business Value
-The model developed can be used to provide HomeCredit with confidence in providing credit to people without prior credit history. The model's threshold can be adjusted based on economic conditions and risk appetite of the company, and could be enhanced in the future to provide more customized solutions to the unbanked population.
+These efforts supported the business by allowing them to produce more accurately the quantities of product that will be purchased in the order window, minimizing overproduction costs and maximizing the revenue captured.
 
 # Contribution
 My contributions included EDA, model development and testing, technical writing and proofreading, and presentation of results to the professors and other students.
 
 # Challenges and Learnings
-The data provided in this analysis was fairly messy and required a large amount of cleaning to be useful. The team found that the cleaning method(s) selected had a large impact on the resulting models' predictive capability. This is not ideal since it makes the analysis more sensitive to the analyst's chosen cleaning methods. This also meant that the team had to align on a cleaned dataset before comparing our respective models. This is likely true for most real-world projects but was the first time I'd encountered it.
-
-During this project, I learned more about the challenges faced when dealing with unbalanced datasets. I also developed my skills in presenting with minimal slides (telling more of the story myself) and received feedback on how to make my messaging even more concise from the professors after the presentation.
+The primary challenge in this project was learning to manage large datasets. With limited computer resources, success was found by reducing the dataset via aggregation, performing the desired operation on the reduced dataset, and then joining the results back to the large dataset. Azure Databricks (using Pyspark, SparklyR, and SQL commands) was also used to perform data exploration.
