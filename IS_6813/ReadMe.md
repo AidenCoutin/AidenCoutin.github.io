@@ -18,7 +18,7 @@ Fig. 1: Probability Distribution of Demand, and Production Recommendations for V
 These efforts supported the business by allowing them to produce more accurately the quantities of product that will be purchased in the order window, minimizing overproduction costs and maximizing the revenue captured. The OUC ratio allows the company to select the production level that minimizes costs to the company.
 
 # Contribution
-My contributions included EDA, model development and testing, technical writing and proofreading, and presentation of results to the professors and other students.
+My contributions included EDA, model development and testing, technical writing and proofreading, and presentation of results to the professors, other students, and company executives.
 
 # Challenges and Learnings
 The primary challenge in this project was learning to manage large datasets. With limited computer resources, success was found by reducing the dataset via aggregation, performing the desired operation on the reduced dataset, and then joining the results back to the large dataset. Azure Databricks (using Pyspark, SparklyR, and SQL commands) was also used to perform data exploration. 
