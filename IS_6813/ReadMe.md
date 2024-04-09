@@ -5,7 +5,7 @@ This project involved using real-life data to address company's business problem
 The objective of this project was to develop a method to predict product demand over short windows of time (weeks).
 
 # Solution
-My [EDA](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/EDA_summary.Rmd) focused on using the flavors derived from the ITEM variable in the dataset to predict demand. The flavors (key terms) were derived from the ITEM variable using [this](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/EDA_ITEM.Rmd) script. This code section ([here](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/snippet_1.R)) was used to remove PACKAGE descriptions from ITEM to aggregation on the ITEM variable in a simpler and more correct fashion. 
+My [EDA](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/EDA_summary.Rmd) focused on using the flavors derived from the ITEM variable in the dataset to predict demand. The flavors (key terms) were derived from the ITEM variable using [this](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/EDA_ITEM.Rmd) script. This code section ([here](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/snippet_1.R)) was used to remove PACKAGE descriptions from ITEM to aggregate on the ITEM variable in a simpler and more correct fashion. 
 
 One of my post-processing steps was to derive a normal distribution of the prediction levels from the model, and analyze that output to determine the optimal production recommendation for the company. The methodology applied is included [here](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/IS_6813/OptimalProduction.Rmd).
 
