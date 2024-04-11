@@ -1,0 +1,425 @@
+---
+title: "Modeling Notebook: Group 1"
+author: "Shane Nisley, Gustav Vollo, Louis Ackumey, Aiden Coutin"
+output: 
+  html_document:
+    toc: true  
+    theme: united  
+    fig_caption: true  
+    highlight: tango  
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+# Setting global chunk options to suppress messages and warnings for cleaner output
+library(knitr)
+opts_chunk$set(message=FALSE, warning=FALSE)
+```
+
+## Load libraries 
+
+```{r, message=FALSE, warning=FALSE}
+# Dynamically loading required libraries using pacman for a cleaner and more efficient setup
+library(dplyr)
+library(forecast)
+library(lubridate)
+# pacman automatically checks for and installs missing packages
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, skimr, GGally, plotly, viridis, 
+               caret, DT, data.table, lightgbm, readr, e1071, 
+               ranger, parallel, mice, corrplot, ggplot2, C50, psych, caret, rminer, rmarkdown, stringr, matrixStats, kableExtra, knitr)
+
+# Setting working directory to the specified path for consistent file access
+setwd("C:\\Users\\amcou\\Documents\\GradSchool\\Classes\\S4 Spring 2024\\Capstone 3\\Assignments")
+
+```
+
+# Modeling Question 6
+
+```{r}
+merged_4 <- read.csv("merged_2.csv")
+merged_3 <- merged_4
+
+# Step 1: Preprocess the data
+# Convert DATE to a Date type and extract useful features
+merged_3$DATE <- as.Date(merged_3$DATE)
+merged_3$YEAR <- year(merged_3$DATE)
+#merged_3$month <- month(merged_3$DATE)
+#merged_3$day <- day(merged_3$DATE)
+merged_3$WEEK <- week(merged_3$DATE)
+
+```
+
+``` {r}
+rm(merged_4)
+
+q7_data <- merged_3 %>%
+  select(everything()) %>%
+  filter(CATEGORY == "SSD",
+         grepl("PINK|WOODSY|PEPPY|GENTLE", ITEM, ignore.case = TRUE),
+         str_detect(PACKAGE, fixed(".5L")),
+         Region == "Southwest",
+         CALORIC_SEGMENT == "REGULAR")
+
+q7_data$MONTH <- month(q7_data$DATE)
+q7_data <- q7_data[q7_data$UNIT_SALES %% 1 == 0,]
+
+q7_data <- q7_data %>%
+  filter(PACKAGE != ".5L 8ONE SHADYES JUG", PACKAGE != "1.5L MULTI JUG") %>%
+  mutate(
+    UNIT_SALES = case_when(
+      PACKAGE == ".5L 24ONE JUG" ~ UNIT_SALES * 4,
+      PACKAGE == ".5L 12ONE JUG" ~ UNIT_SALES * 2,
+      TRUE ~ UNIT_SALES
+    )
+  )
+
+q7_data$NEW_AVG_PRICE = q7_data$DOLLAR_SALES / q7_data$UNIT_SALES
+#q7_data2 <- q7_data %>%
+#  group_by(YEAR, WEEK, MANUFACTURER, BRAND, ITEM, PACKAGE) %>% 
+#  summarize(UNIT_SALES_TOT = sum(UNIT_SALES)) %>% 
+#  group_by(YEAR, WEEK, MANUFACTURER, BRAND) %>% 
+#  summarize(UNIT_SALES_PROD = mean(UNIT_SALES_TOT))
+
+#q7_data2$WEEK <- factor(q7_data2$WEEK)
+#q7_data2$MANUFACTURER <- factor(q7_data2$MANUFACTURER)
+#q7_data2$BRAND <- factor(q7_data2$BRAND)
+
+question7 <- data.frame(
+  MANUFACTURER = rep("SWIRE-CC", 13),
+  BRAND = rep("PEPPY", 13),
+  PACKAGE = rep(".5L 6ONE JUG", 13),
+  WEEK = factor(seq(10, 22)),  # Sequence from week 10 to 22
+  YEAR = rep(2024, 13)  # Replicate 2024 for each week
+)
+
+
+
+
+
+weekly_sales0 <- q7_data %>%
+  group_by(YEAR, WEEK, ITEM) %>%
+  summarize(total_unit_sales = sum(UNIT_SALES))
+
+weekly_salesB <- q7_data %>%
+  group_by(YEAR, WEEK, ITEM) %>%
+  summarize(total_unit_sales = sum(UNIT_SALES)) %>%
+  group_by(YEAR, WEEK) %>%
+  summarize(total_unit_sales = mean(total_unit_sales),n=n())
+
+
+weekly_sales <- q7_data %>%
+  group_by(YEAR, WEEK, ITEM) %>%
+  summarize(total_unit_sales = sum(UNIT_SALES)) %>%
+  group_by(YEAR, WEEK) %>%
+  summarize(total_unit_sales = mean(total_unit_sales))
+
+sales_ts <- ts(weekly_sales$total_unit_sales, frequency=52, start=c(2021, which(weekdays(as.Date("2020-12-05")) == "Saturday")))
+
+
+# Include the intervention in the ARIMA model using the xreg argument
+fit <- auto.arima(sales_ts, seasonal = TRUE, D = 1, max.P = 2, max.Q = 2, max.order = 5, stepwise = FALSE, approximation = FALSE)
+
+# Forecast with the future values of the launch period
+forecasted_sales3 <- forecast(fit, h=13)
+forecasted_sales3b <- forecast(fit, h=13, level = c(0,10,20,30,40,50,60,70,80,90,95))
+
+x1 <- as.data.frame(forecasted_sales3b)
+x1 <- x1[,c(1,3,5,7,9,11,13,15,17,19,21,23)]
+x1 <- x1/1.7*1.081^2
+x1[,2:12] <- x1[,2:12] - x1[,1]
+x1[nrow(x1)+1,] <- colSums(x1)
+rownames(x1) <- c(1:13,"sum")
+colnames(x1) <- c("mean",0,10,20,30,40,50,60,70,80,90,95)
+
+cNs <-colnames(x1)
+nS <- 44
+sdAvg <- array()
+for (ii in 1:nrow(x1)) {
+  sd <- array()
+  for (jj in 3:ncol(x1)) {
+    zS <- qnorm(p=(as.numeric(cNs[jj])+100)/2/100, lower.tail=TRUE)
+    sem <- x1[ii,jj]/zS
+    sd[jj-2] <- sem*sqrt(nS)
+  }
+  sdAvg[ii] <- mean(sd)
+}
+x1[,ncol(x1)+1] <- sdAvg
+colnames(x1) <- c(cNs,"sd")
+cNs <- colnames(x1)
+
+
+#for (ii in 1:nrow(x1)) {
+#  optOrd[ii] <- qnorm(cf, x1[ii,1], x1[ii,13])
+#}
+
+cu <- 1
+x1a <-x1[nrow(x1),]
+cNs <- colnames(x1a)
+for (co in c(1,2,3,4)) {
+  cf <- cu/(cu+co)
+  x1a[,ncol(x1a)+1] <- qnorm(cf, x1a[1,1], x1a[1,13])
+}
+
+colnames(x1a) <- c(cNs,"optOrd1","optOrd2","optOrd3","optOrd4")
+cNs <- colnames(x1)
+
+x2 <- x1[nrow(x1),c(1,3,4,5,6,7,8,9,10,11,12,13)]
+x_mean <- x2[1] 
+x_opt1 <- x1a[14]
+x_opt1[2,1] <- x_opt1[1,1]
+x_opt1[1,2] <- 0
+x_opt1[2,2] <- 1
+colnames(x_opt1) <- c("opt","prob")
+rownames(x_opt1) <- 1:nrow(x_opt1)
+
+x_opt2 <- x1a[15]
+x_opt2[2,1] <- x_opt2[1,1]
+x_opt2[1,2] <- 0
+x_opt2[2,2] <- 1
+colnames(x_opt2) <- c("opt","prob")
+rownames(x_opt2) <- 1:nrow(x_opt2)
+
+x_opt3 <- x1a[16]
+x_opt3[2,1] <- x_opt3[1,1]
+x_opt3[1,2] <- 0
+x_opt3[2,2] <- 1
+colnames(x_opt3) <- c("opt","prob")
+rownames(x_opt3) <- 1:nrow(x_opt3)
+
+x_opt4 <- x1a[17]
+x_opt4[2,1] <- x_opt4[1,1]
+x_opt4[1,2] <- 0
+x_opt4[2,2] <- 1
+colnames(x_opt4) <- c("opt","prob")
+rownames(x_opt4) <- 1:nrow(x_opt4)
+
+x2 <- x2[,2:11]
+x3 <- cbind(-rev(x2),0,x2)+x_mean[1,1]
+x3[2,] <- (seq(-100,100,10)+100)/2/100
+x3[2,1] <- 0.025
+x3[2,ncol(x3)] <- 0.975
+rownames(x3) <- c("data","prob")
+colnames(x3) <- 1:ncol(x3)
+x3 <- as.data.frame(t(x3))
+for (ii in 1:nrow(x3)) {
+  x3[ii,2] <- min(x3[ii,2],abs(1-x3[ii,2]))
+}
+
+ggplot(data=x3,aes(x=data,y=prob)) + geom_smooth(se=FALSE) +
+  geom_line(data=x_opt1, aes(x=opt,y=prob)) +
+  geom_line(data=x_opt2, aes(x=opt,y=prob)) +
+  geom_line(data=x_opt3, aes(x=opt,y=prob)) + 
+  geom_line(data=x_opt4, aes(x=opt,y=prob))
+
+
+
+
+
+
+
+```
+
+
+```{r}
+
+# Filter data for products matching specific criteria
+similar_products <- merged_3 %>%
+  filter(CALORIC_SEGMENT == "DIET/LIGHT", 
+         CATEGORY == "ENERGY", 
+         PACKAGE == "16SMALL MULTI CUP",
+         MANUFACTURER == "SWIRE-CC") %>%
+  filter(UNIT_SALES > 0)
+
+
+rm(merged_3)
+gc()
+```
+
+## ARIMA Model Development
+
+```{r}
+# Aggregate weekly sales data of similar products
+weekly_sales0 <- similar_products %>%
+  group_by(YEAR, WEEK, ITEM) %>%
+  summarize(total_unit_sales = sum(UNIT_SALES)) %>%
+  filter(YEAR < 2022)
+
+weekly_sales <- weekly_sales0 %>%
+  group_by(YEAR, WEEK) %>%
+  summarize(total_unit_sales = mean(total_unit_sales))
+
+
+# arima
+sales_ts <- ts(weekly_sales$total_unit_sales, frequency=52, start=c(2021, which(weekdays(as.Date("2020-12-05")) == "Saturday")))
+
+
+launch_period <- ifelse(time(sales_ts) >= 2021 & time(sales_ts) < 2021.5, 1, 0) 
+
+# Include the intervention in the ARIMA model using the xreg argument
+fit <- auto.arima(sales_ts, xreg = launch_period, seasonal = TRUE, D = 1, max.P = 2, max.Q = 2, max.order = 5, stepwise = FALSE, approximation = FALSE)
+
+
+#launch period effect only impacts the first 26 weeks
+future_launch_period <- rep(0, 26) # No launch effect in the future
+
+# Forecast with the future values of the launch period
+forecasted_sales <- forecast(fit, xreg = future_launch_period, h=26)
+forecasted_sales2 <- forecast(fit, xreg = future_launch_period, h=26, level = c(0,10,20,30,40,50,60,70,80,90,95))
+
+x1 <- as.data.frame(forecasted_sales2)
+x1 <- x1[,c(1,3,5,7,9,11,13,15,17,19,21,23)]
+x1 <- x1/1.7*1.081^2
+x1[,2:12] <- x1[,2:12] - x1[,1]
+x1[nrow(x1)+1,] <- colSums(x1)
+rownames(x1) <- c(1:26,"sum")
+colnames(x1) <- c("mean",0,10,20,30,40,50,60,70,80,90,95)
+
+cNs <-colnames(x1)
+nS <- 4
+sdAvg <- array()
+for (ii in 1:nrow(x1)) {
+  sd <- array()
+  for (jj in 3:ncol(x1)) {
+    zS <- qnorm(p=(as.numeric(cNs[jj])+100)/2/100, lower.tail=TRUE)
+    sem <- x1[ii,jj]/zS
+    sd[jj-2] <- sem*sqrt(nS)
+  }
+  sdAvg[ii] <- mean(sd)
+}
+x1[,ncol(x1)+1] <- sdAvg
+colnames(x1) <- c(cNs,"sd")
+cNs <- colnames(x1)
+
+
+#for (ii in 1:nrow(x1)) {
+#  optOrd[ii] <- qnorm(cf, x1[ii,1], x1[ii,13])
+#}
+
+cu <- 1
+x1a <-x1[nrow(x1),]
+cNs <- colnames(x1a)
+for (co in c(1,2,3,4)) {
+  cf <- cu/(cu+co)
+  x1a[,ncol(x1a)+1] <- qnorm(cf, x1a[1,1], x1a[1,13])
+}
+
+colnames(x1a) <- c(cNs,"optOrd1","optOrd2","optOrd3","optOrd4")
+cNs <- colnames(x1)
+
+highProb <- 0.6
+
+x2 <- x1[nrow(x1),c(1,3,4,5,6,7,8,9,10,11,12,13)]
+x_mean <- x2[1] 
+x_opt1 <- x1a[14]
+x_opt1[2,1] <- x_opt1[1,1]
+x_opt1[1,2] <- 0
+x_opt1[2,2] <- highProb
+colnames(x_opt1) <- c("opt","prob")
+rownames(x_opt1) <- 1:nrow(x_opt1)
+
+x_opt2 <- x1a[15]
+x_opt2[2,1] <- x_opt2[1,1]
+x_opt2[1,2] <- 0
+x_opt2[2,2] <- highProb
+colnames(x_opt2) <- c("opt","prob")
+rownames(x_opt2) <- 1:nrow(x_opt2)
+
+x_opt3 <- x1a[16]
+x_opt3[2,1] <- x_opt3[1,1]
+x_opt3[1,2] <- 0
+x_opt3[2,2] <- highProb
+colnames(x_opt3) <- c("opt","prob")
+rownames(x_opt3) <- 1:nrow(x_opt3)
+
+x_opt4 <- x1a[17]
+x_opt4[2,1] <- x_opt4[1,1]
+x_opt4[1,2] <- 0
+x_opt4[2,2] <- highProb
+colnames(x_opt4) <- c("opt","prob")
+rownames(x_opt4) <- 1:nrow(x_opt4)
+
+x2 <- x2[,2:11]
+x3 <- cbind(-rev(x2),0,x2)+x_mean[1,1]
+x3[2,] <- (seq(-100,100,10)+100)/2/100
+x3[2,1] <- 0.025
+x3[2,ncol(x3)] <- 0.975
+rownames(x3) <- c("data","prob")
+colnames(x3) <- 1:ncol(x3)
+x3 <- as.data.frame(t(x3))
+for (ii in 1:nrow(x3)) {
+  x3[ii,2] <- min(x3[ii,2],abs(1-x3[ii,2]))
+}
+
+ggplot(data=x3,aes(x=data,y=prob)) + geom_smooth(se=FALSE, aes(color="a",linetype="a")) +
+  geom_line(data=x_opt1, aes(x=opt,y=prob, color="b",linetype="b")) +
+  geom_line(data=x_opt2, aes(x=opt,y=prob, color="c",linetype="c")) +
+  geom_line(data=x_opt3, aes(x=opt,y=prob, color="d",linetype="d")) +
+  geom_line(data=x_opt4, aes(x=opt,y=prob, color="e",linetype="e")) +
+  labs(title="Probability Distribution vs Demand",
+       x="Demand (Total Units Over 26 Weeks)",
+       y="Probability") +
+    scale_y_continuous(breaks = seq(0, 0.6, by = 0.1)) + 
+    scale_color_manual(name="OUC = Overage/Underage Cost",
+      values = c("a" = "black", "b" = "red", "c" = "red", "d" = "red", "e" = "blue"),
+      labels = c("distribution", "nominal (OUC=1)", "OUC = 2", "OUC = 3", "OUC = 4")) +
+    scale_linetype_manual(name="OUC = Overage/Underage Cost",
+      values = c("a" = "solid", "b" = "dashed", "c" = "dotdash", "d" = "dotted", "e" = "solid"),
+      labels = c("distribution", "nominal (OUC=1)", "OUC = 2", "OUC = 3", "OUC = 4")) +
+    theme_classic() + 
+    theme(legend.position = c(0.85, 0.75),
+          legend.title=element_text(size=9), 
+          legend.text=element_text(size=8),
+          legend.key.width = unit(1.35,"cm"),
+          legend.background = element_blank(),
+          legend.box.background = element_rect(colour = "black")) +
+    guides(color = guide_legend(override.aes = list(size=1.5)))
+
+
+
+```
+
+
+```{r}
+# forecast plot
+#plot(forecasted_sales)
+
+# Forecast values mean
+#print(forecasted_sales$mean)
+
+# values & CI
+#print(forecasted_sales)
+
+# Calculate in-sample fitted values
+#fitted_values <- fitted(fit)
+
+# Calculate residuals 
+#residuals <- sales_ts - fitted_values
+
+# Calculate RMSE
+#rmse <- sqrt(mean(residuals^2, na.rm = TRUE))
+#print(paste("RMSE:", rmse))
+
+
+# Total Sum of Squares
+#tss <- sum((sales_ts - mean(sales_ts))^2)
+
+# Sum of Squares of Residuals
+#rss <- sum(residuals^2)
+
+# R-squared
+#rsq <- 1 - (rss / tss)
+#print(paste("R-squared:", rsq))
+
+#adjust1 <- sum(forecasted_sales$mean) / 1.7
+
+#adjust2 <- adjust1*1.081
+
+#adjust3 <- adjust2*1.081
+  
+#predicted_demand <- round(adjust3,0)
+
+#print(paste("Predicted Demand For 6 Months:",predicted_demand))
+```

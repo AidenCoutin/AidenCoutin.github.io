@@ -1,0 +1,234 @@
+---
+title: "Project"
+author: "Aiden Coutin" 
+date: "2024-02-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(stringr)
+library(dplyr)
+```
+
+``` {r}
+
+# setup workspace and load initial data
+
+setwd("C:\\Users\\amcou\\Documents\\GradSchool\\Classes\\S4 Spring 2024\\Capstone 3\\Assignments\\UoU_MSBA")
+
+fil1 <- "FACT_MARKET_DEMAND-001.csv"
+#fil1 <- "FACT_MARKET_DEMAND-002.csv"
+#fil2 <- "zip_to_market_unit_mapping.csv"
+
+#data1 <- read.csv(fil1)
+#data1b <- read.csv(fil1)
+#data2 <- read.csv(fil2)
+#save(data1, file='data1.rda')
+
+```
+
+``` {r}
+
+# load item list and word list, and return count of each word's occurrence in item list
+# word list contains 135 (or 136) top (intuitive) words derived from the comprehensive word list
+
+# I did not use the brand category to down-select words here (i.e. did not remove brand names)
+
+load(file='item.rda') #loads variable a
+#load(file='wordList.rda')
+d <- read.csv('wordList.csv')
+
+colnames(d) <- c('var','count')
+for (ii in 1:length(d[[1]])) {
+  d[ii,2] = length(grep(d[[1]][ii], a))
+}
+write.csv(d,'wordList2.csv')
+
+```
+
+``` {r}
+# save only the dollar sales data to a separate file
+load(file='data1.rda')
+data1 <- data1[c("DOLLAR_SALES")]
+save(data1, file='dollarSales.rda')
+
+```
+
+``` {r}
+
+# load word list and generate one-hot encoding for all words
+#   this word list is the reduced set from user selection
+
+#d <- read.csv('wordList_allWords.csv')
+#d<-d[126:nrow(d),2] # remove numbers, etc
+
+data1 <- read.csv(fil1)
+data1 <- data1[c("ITEM")]
+
+d <- read.csv('wordList.csv')
+d <- d$d
+
+nStart <- 87
+data1b <- data1 %>% select(-c('ITEM'))
+nC <- ncol(data1)
+
+# return one-Hot encoding for occurrence of a word in an ITEM description
+# done in two parts due to computer memory limits
+for (ii in (nStart+1):length(d)) {
+  data1b[grep(d[[ii]], data1$ITEM),ii-nStart] <- 1
+}
+rm(data1)
+colnames(data1b) <- d
+save(data1b, file='oneHot1.rda') #1:87
+#save(data1b, file='oneHot2.rda') #88:end
+
+
+# return percentage occurrence of words in the full dataset
+#   this can also be derived from the summation of the one-hot / nrows()
+pct <- data.frame(pct = double())
+for (ii in 1:ncol(data1b)) {
+  pct[ii,1] <- sum(!is.na(data1b[,ii]))/nrow(data1b)
+}
+pct[,1]<-pct[,1]*100
+write.csv(pct,'pct1.csv')
+#write.csv(pct,'pct2.csv')
+
+```
+
+``` {r}
+
+# convert NAs to zeros (easier math, easier storage?)
+
+load(file='oneHot1.rda')
+#load(file='oneHot2.rda')
+for (ii in 1:ncol(data1b)) {
+  data1b[is.na(data1b[,ii]),ii] <- 0
+}
+save(data1b, file='oneHot1.rda')
+#save(data1b, file='oneHot2.rda')
+
+```
+
+``` {r}
+
+# load dataset, and merge similar values
+# remove outdated variables, and those without enough occurrences
+# rename columns to the wordList
+
+d <- read.csv('wordList.csv')
+x1 <- d[c(1:108,110:136,109),"d"] # sorted because red wasn't added until the end
+rm(d)
+
+load(file='oneHot1.rda')
+colnames(data1b) <-x1[1:87]
+data1b$COFFEE <- min(data1b$COFFEE+data1b$COFFEA,1)
+data1b$ENERGY <- min(data1b$ENERGY+data1b$ENRGY,1)
+data1b$KULA <- min(data1b$KULA+data1b$KOLA,1)
+data1b<-data1b[,c(1:31,33:53,55:73,75:87)]
+save(data1b, file='oneHot1.rda')
+load(file='oneHot1.rda')
+data1b<-data1b[,-c(10,14,20,34:36,46,48:50,59,75,80)]
+save(data1b, file='oneHot1.rda')
+rm(data1b)
+
+load(file='oneHot2.rda')
+data1 <- read.csv(fil1)
+data1 <- as.data.frame(data1$ITEM)
+colnames(data1) <- c("ITEM")
+
+data1$ITEM <- gsub("UNFLAVORED","",data1$ITEM) # to get RED summary
+data1b[grep("RED", data1$ITEM),49] <- 1
+
+colnames(data1b) <- x1[88:136]
+data1$ITEM <- gsub("MIXED-TROPPY","",data1$ITEM) # to get TROPPY summary
+data1b["TROPPY"] <- 0
+data1b[grep("TROPPY", data1$ITEM),40] <- 1
+data1b$TROPPY <- min(data1b$TROPPY+data1b$TROPICAL,1)
+data1b$RED <- min(data1b$RED+data1b$ROJO,1)
+data1b$SANGRIA <- min(data1b$SANGRIA+data1b$SANGRITA,1)
+data1b<-data1b[,c(1:21,23:28,30:38,40:49)]
+
+data1$ITEM <- gsub("RAZZBERRY","",data1$ITEM) # to get RAZZ summary
+data1b["RAZZ"] <- 0
+data1b[grep("RAZZ", data1$ITEM),20] <- 1
+
+data1$ITEM <- gsub("RAZZ","",data1$ITEM) # to get RAZZ summary
+data1b["RAZ"] <- 0
+data1b[grep("RAZ", data1$ITEM),19] <- 1
+
+data1b<-data1b[,c(1:11,13:15,17:22,24:30,32:46)]
+save(data1b, file='oneHot2.rda')
+
+```
+
+``` {r}
+
+# load dollarSales data and all oneHot terms, reduce rows, and fit model
+#   commented out: validation of column names vs oneHot counts
+
+load(file='dollarSales.rda')
+
+set.seed(73)
+nR <- 50000
+idx <- sample(nrow(data1), nR)
+
+data2 <- data.frame(matrix(double(), nrow = nR, ncol = 1))
+colnames(data2) <-c("DOLLAR_SALES")
+data2$DOLLAR_SALES <- data1[idx,1]
+rm(data1)
+
+load(file='oneHot1.rda')
+data1b<-data1b[idx,]
+data2 <- cbind(data2,data1b)
+rm(data1b)
+
+load(file='oneHot2.rda')
+data1b<-data1b[idx,]
+data2 <- cbind(data2,data1b)
+rm(data1b)
+
+cNs <- colnames(data2[,2:ncol(data2)])
+data2[,cNs] <- lapply(data2[,cNs] , factor)
+
+idx2 <- double()
+for (ii in 2:ncol(data2)) {
+  ln <- length(unique(data2[,ii]))
+  if (ln<2) {
+    idx2 <- c(idx2,ii)
+  }
+}
+data2 <- data2[,-idx2]
+
+m1 <- glm(DOLLAR_SALES ~ ., data=data2)
+print(summary(m1))
+
+
+## data validation
+# data1 <- read.csv(fil1)
+# data1 <- data1[c("ITEM")]
+# data1 <- as.data.frame(data1)
+# colnames(data1) <- c("ITEM")
+# data1$ITEM <- gsub("RAZZBERRY","",data1$ITEM)
+# data1$ITEM <- gsub("RAZZ","",data1$ITEM)
+# 
+# cNs <- colnames(data2)
+# for (ii in 75){
+# #for (ii in 2:ncol(data2)){
+#   cN <- cNs[ii]
+#   t<-table(data2[,ii])
+#   x1 <- t[2]
+#   
+#   x2<-data.frame(matrix(double(), nrow = nrow(data2), ncol = 1))
+#   x2[grep(cN, data1$ITEM),1] <- 1
+#   x3 <- sum(!is.na(x2[,1]))
+#   
+#   #print(paste(ii,": ", x1==x3))
+#   print(paste(ii,": ", x1,",",x3))
+# }
+# rm(data1)
+# rm(x1,x2,x3,t,ln,ii)
+
+```
