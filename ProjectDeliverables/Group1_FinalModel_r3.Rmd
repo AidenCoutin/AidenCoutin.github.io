@@ -1,0 +1,707 @@
+---
+title: "Modeling Notebook: Group 1"
+author: "Shane Nisley, Gustav Vollo, Louis Ackumey, Aiden Coutin"
+output: 
+  html_document:
+    toc: true  
+    theme: united  
+    fig_caption: true  
+    highlight: tango  
+editor_options: 
+  chunk_output_type: inline
+---
+
+## Business Problem
+
+Our business problem is to accurately forecast demand of Swire’s limited-release products, preventing both out-of-stocks and overproduction, and ensuring optimal production quantities that align with evolving consumer preferences. Achieving this goal will help Swire drive revenue growth and cost savings, expand market reach, and maintain a competitive edge in response to evolving consumer preferences and industry dynamics.
+
+
+## Analytics Approach
+
+This problem is a supervised regression problem, where the target variable is units sold over a period of time as a metric for Swire’s demand. The questions posed by Swire vary in character, but are all based on a desire to predict volume of sales (demand) over a period of time. Many modeling options (ARIMA, logistic regression, kNN, decision trees, among others) were explored, and ARIMA was selected as the final model development tool. 
+
+## Notebook Purpose
+
+The intent of this notebook is to capture the modelling done to answer some of the questions (#6, #7) that Swire posed. This notebook contains data preprocessing efforts, aggregation and validation, results summary, and future steps.
+
+
+```{r setup, include=FALSE}
+# Setting global chunk options to suppress messages and warnings for cleaner output
+library(knitr)
+opts_chunk$set(message=FALSE, warning=FALSE)
+```
+
+## Load libraries 
+
+```{r, message=FALSE, warning=FALSE}
+# Dynamically loading required libraries using pacman for a cleaner and more efficient setup
+library(dplyr)
+library(forecast)
+library(lubridate)
+# pacman automatically checks for and installs missing packages
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, skimr, GGally, plotly, viridis, 
+               caret, DT, data.table, lightgbm, readr, e1071, 
+               ranger, parallel, mice, corrplot, ggplot2, C50, psych, caret, rminer, rmarkdown, stringr, matrixStats, kableExtra, knitr)
+
+# Setting working directory to the specified path for consistent file access
+#setwd(getwd())
+#setwd("C:/Users/u1295825/OneDrive - University of Utah/Documents/Capstone2")
+#setwd("C:\\Users\\amcou\\Documents\\GradSchool\\Classes\\S4 Spring 2024\\Capstone 3\\Assignments")
+
+# Loading the dataset for analysis
+merged_4 <- read.csv("merged_2.csv")
+merged_2 <- merged_4 # for Q6 later
+```
+
+# Modeling Question 7
+
+Here, we define the specific product characteristics that Swire plans to release, focusing on a particular flavor, packaging type, and brand. The goal is to predict demand over a 13-week period in the Southern region.
+
+- Item description: Peppy Gentle Drink Pink Woodsy .5L Multi Jug
+- Caloric: Regular
+- Category: SSD
+- Manufacturer: Swire-CC
+- Brand: Peppy
+- Package Type: .5L Multi Jug
+- Flavor: 'Pink Woodsy'
+- Question: Swire plans to release this product in the Southern region for 13 weeks. What will the demand
+be, in weeks, for this product?
+
+## Date manipulation
+```{r}
+# To begin with, we want to make new columns for Year, Month and Week.
+# Preprocess the data
+merged_4$DATE <- as.Date(merged_4$DATE)
+merged_4$YEAR <- year(merged_4$DATE)
+merged_4$MONTH <- month(merged_4$DATE)
+merged_4$WEEK <- week(merged_4$DATE)
+```
+
+Recognizing that Weeks, Month and Year may influence future demand predictions, we prepared the data by extracting these time components for use in our models. By incorporating month and year into our dataset, we aim to capture seasonal and annual trends that could influence the demand for the new product. This transformation makes our dataset more suitable for time-series analysis or models that can account for temporal variations.
+
+## Making a subset of filtered data for modeling
+
+```{r}
+library(stringr)
+
+#To align our dataset with the product characteristics of interest, we filter `merged_4` for entries that match the given descriptions. This subset will serve as the basis for our demand prediction models.
+
+# Filtering `merged_4` for entries that match our product criteria
+q7_data <- merged_4 %>%
+  select(everything()) %>%
+  filter(CATEGORY == "SSD",
+         grepl("PINK|WOODSY|PEPPY|GENTLE", ITEM, ignore.case = TRUE),
+         str_detect(PACKAGE, fixed(".5L")),
+         Region == "Southwest",
+         CALORIC_SEGMENT == "REGULAR")
+
+# Ensuring that UNIT_SALES contains only whole orders for consistency
+q7_data <- q7_data[q7_data$UNIT_SALES %% 1 == 0,]
+
+# Visualizing the distribution of average prices across different packaging options
+ggplot(data = q7_data, aes(x = PACKAGE, y = AVG_PRICE)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Boxplot of Average price for packaging options",
+       x = "Package",
+       y = "Average Price")
+```
+
+The data is now saved as a filtered dataset where most of the characteristics replicate the description of the item in question 7. The initial data filtering highlights inconsistencies in packaging options and their associated pricing, which need standardization for accurate demand prediction.
+
+```{r}
+# Standardizing UNIT_SALES to a comparable basis across different packaging options
+q7_data <- q7_data %>%
+  filter(PACKAGE != ".5L 8ONE SHADYES JUG", PACKAGE != "1.5L MULTI JUG") %>%
+  mutate(
+    UNIT_SALES = case_when(
+      PACKAGE == ".5L 24ONE JUG" ~ UNIT_SALES * 4,
+      PACKAGE == ".5L 12ONE JUG" ~ UNIT_SALES * 2,
+      TRUE ~ UNIT_SALES
+    )
+  )
+
+# Recalculating average price based on the standardized UNIT_SALES
+q7_data$NEW_AVG_PRICE = q7_data$DOLLAR_SALES / q7_data$UNIT_SALES
+
+# Re-visualizing the distribution of new average prices after standardization
+ggplot(data = q7_data, aes(x = PACKAGE, y = NEW_AVG_PRICE)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Boxplot of New Average Price for Packaging Options",
+       x = "Package",
+       y = "Average Price")
+```
+
+We standardized the PACKAGES by adjusting UNIT_SALES to be similar to .5L 6ONE JUG. After standardizing UNIT_SALES, we can now compare numerical sales data across different PACKAGE labels on a like-for-like basis, paving the way for more accurate demand prediction.
+
+## Make data ready for modeling
+
+To simplify our modeling process, we remove columns that won't be used in the prediction models due to redundancy or potential multicollinearity. We also ensure that categorical data is properly encoded.
+
+```{r}
+# Preparing the dataset by grouping by predictor columns and ensuring correct data types
+q7_data2 <- q7_data %>%
+  group_by(YEAR, WEEK, MANUFACTURER, BRAND, ITEM, PACKAGE)%>% # first grouping by all possible products
+  summarize(UNIT_SALES_TOT = sum(UNIT_SALES))%>% # aggregating total unit sales per profuct per week
+  group_by(YEAR, WEEK, MANUFACTURER, BRAND)%>% # Then grouping by only the predictor values
+  summarize(UNIT_SALES_PROD = mean(UNIT_SALES_TOT)) # Lastly creating an average units per product by brand
+
+# Converting the Week column to a factor to treat it as categorical data
+q7_data2$WEEK <- factor(q7_data2$WEEK)
+q7_data2$MANUFACTURER <- factor(q7_data2$MANUFACTURER)
+q7_data2$BRAND <- factor(q7_data2$BRAND)
+#q7_data2$PACKAGE <- factor(q7_data2$PACKAGE) # removing package to increase model prediction
+
+# Displaying the first few rows of the cleaned dataset
+head(q7_data2)
+```
+
+The dataset is now prepared for modeling, with categorical variables properly encoded and unrelated or redundant columns removed. This cleanup helps in reducing the complexity and improving the accuracy of the predictive models.
+
+## Test Set Generation
+
+We construct a hypothetical test set based on the product description provided by Swire. This set will be used to predict the demand for the specified product characteristics. As we want to predict for 13 weeks, there will be 13 rows in the dataset to predict.
+
+```{r}
+# Defining a new data frame to represent the specific product in question
+question7 <- data.frame(
+  MANUFACTURER = rep("SWIRE-CC", 13),
+  BRAND = rep("PEPPY", 13),
+  PACKAGE = rep(".5L 6ONE JUG", 13),
+  WEEK = factor(seq(10, 22)),  # Sequence from week 10 to 22
+  YEAR = rep(2024, 13)  # Replicate 2024 for each week
+)
+# We have used week 10 to 22 arbitrary, and this can be adjusted to fit more specific time frames.
+
+
+# Calculating the total days of production based on the 13-week period
+
+# Displaying the hypothetical test set and the calculated average price
+print(question7)
+```
+
+## Model Validation
+
+```{r}
+# Setting a seed for reproducibility
+set.seed(10)
+
+# Creating indices for the training set
+inTrain <- createDataPartition(y = q7_data2$UNIT_SALES_PROD, p = 0.70, list = FALSE)
+
+# Splitting the dataset into training and testing sets
+train_target <- q7_data2[inTrain, 5]
+test_target <- q7_data2[-inTrain, 5]
+train_input <- q7_data2[inTrain, -5]
+test_input <- q7_data2[-inTrain, -5]
+
+train_target <- unlist(train_target)
+test_target <- unlist(test_target)
+
+# Specifying a list of metrics for model evaluation
+metrics_list <- c("MAE", "RMSE", "MAPE", "RMSPE", "RAE", "RRSE", "R2")
+```
+
+## Model 1: Linear Regression
+
+First, we employ a linear regression model. This model will attempt to predict the demand based on a linear relationship between the predictor variables and the target variable.
+
+```{r}
+# Training the linear regression model on the training data
+model2 <- lm(train_target ~ ., data = train_input)
+
+# Making predictions using the linear model on both training and test data
+train_predictions2 <- predict(model2, train_input)
+test_predictions2 <- predict(model2, test_input)
+
+# Evaluating the performance of the linear model using predefined metrics
+train_result <- mmetric(train_target, train_predictions2, metrics_list)
+test_result <- mmetric(test_target, test_predictions2, metrics_list)
+
+train_result
+test_result
+
+# Reviewing the model summary to understand the significance of predictors
+summary(model2)
+
+rmse_lm <- test_result[["RMSE"]]
+rsq_lm <- test_result[["R2"]]
+
+# Predicting demand for the specific product scenario with the linear model
+Swire_pred_lm <- predict(model2, question7)
+```
+
+The linear regression model provides a straightforward approach to understand how each predictor influences the target variable. Evaluating its performance gives us a benchmark against which to compare more complex models. Based on the similarity in prediction for test and train, we can confirm that the model is fit well. Linear regression is often easier to interpret, and we can see from the model summary that Year is negatively trading and that each week are predicting different demand, which may imply some seasonality and a decrease in demand over time.
+
+From the model summary, we can also see how volatile each different line is. It seems that linear regression is capturing most of the products pretty well due to the way we have aggregated the data. 
+
+As we can see from this linear regression, we are able to achieve a relatively high R-squared of .86 and RMSE of 2752. This model is a good benchmark for the upcoming models. 
+
+The downside with the linear regression is that with few products matching the question 7 description, like BRAND = PEPPY only has a few matching products. Therefore, it will be very biased towards the PEPPY product that appears to be a popular product based on weekly sales ranging over 50,000 units. 
+
+## Model 2: KNN with IBk
+
+Next, we explore a K-Nearest Neighbors model using the IBk algorithm. KNN is a simple yet effective technique for regression and classification tasks. It will smooth out our issues with having few PEPPY products from linear regression.
+
+```{} 
+# Model could not be run for knitting due to issues with Java. The results will be hardcoded instead.
+# Training the KNN model
+library(RWeka)
+model1 <- IBk(train_target ~ .,data = train_input, control = Weka_control(K=4, I = TRUE)) # running it with 4 closest and weighted average
+
+# Making predictions on both the training and test sets
+train_predictions1 <- predict(model1, train_input)
+test_predictions1 <- predict(model1, test_input)
+
+# Evaluating model performance
+train_result <- mmetric(train_target, train_predictions1, metrics_list)
+test_result <- mmetric(test_target, test_predictions1, metrics_list)
+
+train_result
+test_result
+
+rmse_ibk <- test_result[["RMSE"]]
+rsq_ibk <- test_result[["R2"]]
+
+# Predicting demand for the specific product and adjusting by production days and average price
+Swire_pred_IBk <- predict(model1, question7)
+```
+
+This model could not be run for knitting due to issues with Java. The results will be hard coded instead. The KNN model gave an R-squared of 0.87 and RMSE of 2955.
+
+```{r}
+# Hardcode for later table
+rmse_ibk <- 2955.32
+rsq_ibk <- 0.8686
+Swire_pred_IBk <- 59222.43
+```
+
+This is a better R-squared than the linear regression model but has a worse RMSE. This model selects four of the closest products and creates a weighted average, in contrast to the linear regression that predicts on the one PEPPY item in the dataset. We believe this model makes a better guess at what this new product will look like in terms of demand. 
+
+## Model 3: Decision Tree with Rpart
+
+As a third approach, we explore a decision tree model using the `rpart` package. Decision trees can capture non-linear relationships and interactions between predictors.
+
+```{r, fig.width=12, fig.height=10}
+library(rpart)
+#install.packages("rpart.plot")
+library(rpart.plot)
+
+# Training the decision tree model on the training set
+model3 <- rpart(train_target ~ ., data = train_input)
+
+# Making predictions with the decision tree model on both training and test sets
+train_predictions3 <- predict(model3, train_input)
+test_predictions3 <- predict(model3, test_input)
+
+# Evaluating the decision tree model's performance
+train_result <- mmetric(train_target, train_predictions3, metrics_list)
+test_result <- mmetric(test_target, test_predictions3, metrics_list)
+
+train_result
+test_result
+#rpart.plot(model3) #model makes no good plot
+
+rmse_rpart <- test_result[["RMSE"]]
+rsq_rpart <- test_result[["R2"]]
+
+# Predicting demand for the Swire product using the decision tree model
+Swire_pred_rpart <- predict(model3, question7)
+```
+
+Decision trees are particularly useful for their interpretability and ability to handle complex, hierarchical decision-making processes. This model allows us to visually inspect the decision paths and understand the factors driving demand predictions.
+
+Similar to the linear regression, we also see that the metrics for predicting both test and train set are slightly off, implying a chance of overfitting or underfitting. This model has higher errors than linear regression across the board, with a lower R2 too. The model is also easy to interpret and can be used to understand importance of variable. 
+We do however consider this model to be biased, similar to the reasons that linear regression may have a high bias. With few PEPPY products, the projections from this model may not necessarily be accurate despite high r-squared. 
+
+
+## ARIMA Forecasing
+
+By adding ARIMA forecasting to our analysis, which already includes IBK, rpart, and linear regression models, we gain a deeper understanding of sales trends over time, something the initial models might miss. This approach not only makes our sales predictions more reliable by using a method tailored for time series data but also gives us a solid basis for comparison, enhancing the overall accuracy of our forecast.
+
+
+```{r load-preprocess}
+
+#First, we will use the filtered q7_data from previous manipulation and filtering.
+similar_products <- q7_data
+```
+
+
+### Sales Analysis
+
+For ARIMA, we want to do weekly projections. We would need to aggregate sales by year, week and item to find unit sales for each brand per week before aggregating the total average weekly unit sales.
+
+
+```{r sales-analysis}
+# Aggregate weekly sales data
+weekly_sales <- similar_products %>%
+  group_by(YEAR, WEEK, ITEM) %>%
+  summarize(total_unit_sales = sum(UNIT_SALES)) %>%
+  group_by(YEAR, WEEK) %>%
+  summarize(total_unit_sales = mean(total_unit_sales))
+
+```
+
+### Sales Forecasting with ARIMA
+
+Fit an ARIMA model to the time series data and forecast future sales, without taking seasonality into consideration.
+
+```{r forecasting}
+# Create a time series object
+sales_ts <- ts(weekly_sales$total_unit_sales, frequency=52, start=c(2021, which(weekdays(as.Date("2020-12-05")) == "Saturday")))
+
+# Fit an ARIMA model
+fit <- auto.arima(sales_ts)
+
+#calculate in-sample fitted values
+fitted_values <- fitted(fit)
+
+#calculate residuals 
+residuals <- sales_ts - fitted_values
+
+#calculate RMSE
+rmse <- sqrt(mean(residuals^2,na.rm=TRUE))
+print(paste("RMSE:",rmse))
+
+# Total sum of squares
+tss <- sum((sales_ts-mean(sales_ts))^2)
+
+#Sum of squares residuals
+rss <- sum(residuals^2)
+
+#R-squared
+rsq <- 1-(rss/tss)
+print(paste("R-squared:",rsq))
+
+
+# Forecast the next 26 weeks
+forecasted_sales <- forecast(fit, h=13)
+
+# Plot the forecast
+plot(forecasted_sales)
+
+# Print and sum the forecasted mean sales values
+print(forecasted_sales$mean)
+sum(forecasted_sales$mean)
+```
+
+From the ARIMA model, we see that the average sales are trending slightly down, and the 13 week forecast period is forecast as a fairly straight line. 
+
+### Sales Forecast with ARIMA, Adjusted for Seasonality
+
+
+```{r}
+# arima
+sales_ts <- ts(weekly_sales$total_unit_sales, frequency=52, start=c(2021, which(weekdays(as.Date("2020-12-05")) == "Saturday")))
+
+# Include the intervention in the ARIMA model using the xreg argument
+fit <- auto.arima(sales_ts, seasonal = TRUE, D = 1, max.P = 2, max.Q = 2, max.order = 5, stepwise = FALSE, approximation = FALSE)
+
+#calculate in-sample fitted values
+fitted_values <- fitted(fit)
+
+#calculate residuals 
+residuals <- sales_ts - fitted_values
+
+#calculate RMSE
+rmse2 <- sqrt(mean(residuals^2,na.rm=TRUE))
+print(paste("RMSE:",rmse2))
+
+# Total sum of squares
+tss <- sum((sales_ts-mean(sales_ts))^2)
+
+#Sum of squares residuals
+rss <- sum(residuals^2)
+
+#R-squared
+rsq2 <- 1-(rss/tss)
+print(paste("R-squared:",rsq2))
+
+
+# Forecast with the future values of the launch period
+forecasted_sales2 <- forecast(fit, h=13)
+
+plot(forecasted_sales2)
+
+print(forecasted_sales2$mean)
+sum(forecasted_sales2$mean)
+```
+
+We now see the forecast trending similar to the projections. Our R-squared and RMSE is also improved from the previous ARIMA model. We also see that the sales are more weekly dependent than what first thought. 
+
+This ARIMA model is great for seeing the volatility, looking at confidence intervals and gaining insight on future demand. Although R-squared is relatively low (0.54, which is lower than for the previous modeling methods), we believe that this model has better potential. 
+
+Time series models are great for analyzing and forecasting data that varies over time, enabling the identification of underlying patterns such as trends, seasonality, and cycles for decision-making or predictive purposes. This is exactly what Swire is looking for with this product. 
+
+## Comparative Analysis and Conclusion
+
+Having developed and evaluated five different models - KNN, linear regression, decision tree, ARIMA, and ARIMA with seasonality - we now have a comprehensive view of potential demand for the new product. Each model offers unique insights and trade-offs in terms of accuracy, complexity, and interpretability.
+
+```{r}
+# Comparing predicted demand across models
+predicted_demands <- data.frame(
+  Model = c("KNN", "Linear Regression", "Decision Tree", "ARIMA","ARIMA Seasonal"),
+  Predicted_Demand = c(sum(Swire_pred_IBk),
+                       sum(Swire_pred_lm),
+                       sum(Swire_pred_rpart),
+                       sum(forecasted_sales$mean),
+                       sum(forecasted_sales2$mean)),
+  Predicted_R_Squared = c(rsq_ibk,
+                          rsq_lm,
+                          rsq_rpart,
+                          rsq,
+                          rsq2),
+  Predicted_RMSE = c(rmse_ibk,
+                     rmse_lm,
+                     rmse_rpart,
+                     rmse,
+                     rmse2)
+)
+
+# Displaying the predicted demands for review
+kable(predicted_demands, caption = "Predicted Demands by Model")
+```
+
+In conclusion, we see that our more traditional models with linear regression and rpart are predicting with a higher r-squared. The RMSE cannot be compared to the ARIMA, as ARIMA uses a different type of weekly aggregated data. 
+
+The real take-away from this is the range for product demand. With the different models we get a range between 59,000 and 222,500 units for demand over 13 weeks. This is a very wide range that make this prediction hard to really trust. 
+In our humble opinion, the KNN and ARIMA with seasonality have more reasonable results and may be better applied for changes in item description.  
+
+Next, we want to learn about demand specifically during the launch period of a new product. 
+
+## Analysis of Launch Period
+
+We want to discover if any of the product that we have filtered were launched after this data collection started and if so, what did their demand look look like over time. We will do this by grouping data by ITEM to look at what first and last appearance was, before filtering only data where first release was after beginning of the year of 2021. Using only this data, we will create a new index that show what week the product has been on the market. Lastly, we aggregate the average unit sold per week after launch and plot it.
+
+```{r further-analysis, message=FALSE}
+# Filter new_release dataset for items first appearing after 01-01-2021
+new_release <- similar_products %>%
+  group_by(ITEM) %>%
+  summarize(first_appearance = min(DATE), last_app = max(DATE)) %>%
+  filter(first_appearance > as.Date("2021-01-01"))
+
+# Filter similar_products for items matching those in new_release
+filtered_new_release <- similar_products %>%
+  filter(ITEM %in% new_release$ITEM)
+
+# Calculate Week_Index for each item and aggregate sales weekly
+index_data <- filtered_new_release %>%
+  arrange(ITEM, DATE) %>%
+  group_by(ITEM, YEAR, WEEK) %>%
+  mutate(Week_Index = row_number())
+
+new_rel <- index_data%>%
+  group_by(ITEM, Week_Index)%>%
+  summarise(sale_weekly = sum(UNIT_SALES))
+
+
+# Plot the mean weekly sales by Week_Index after the release of items
+filt_new <- new_rel %>%
+  group_by(Week_Index) %>%
+  summarize(sales_post_rel = mean(sale_weekly))
+
+ggplot(filt_new, aes(x = Week_Index, y = sales_post_rel)) +
+  geom_line() +
+  labs(title = "Average volume of weekly sales x weeks after release",
+       x = "Week",
+       y = "Volume of weekly sales") +
+  theme_minimal()
+
+```
+
+We can infer from this plot that the demand may have an initial peak after 5 weeks, before going down for the following 10 weeks. After this period, it looks like the demand stays fairly consistent. The further to the right on the graph we go, the fewer products will exist and we have data for only a handful of product surpassing 60 weeks making the graph more volatile. 
+
+## Conclusion
+
+This analysis provided a comprehensive overview of the sales trends for a specific product category. Starting from preprocessing the data to applying predictive modeling, like kNN, linear regression and rpart, to time series modeling with ARIMA for sales forecasting. We have extracted valuable insights into potential sales dynamics over the coming months. Further, by filtering for new product releases and analyzing sales trends post-release, we now can better understand the impact of new products on overall sales performance.
+
+For this specific product, we have defined the 13-week demand to be in units. Our recommendation is that the total demand will be in the range between 55,000 and 80,000 for the 13 weeks. There will be some variation, from week-to-week, with a likely peak around 5-6 weeks in. 
+
+
+# Modeling Question 6
+
+- Item Description: Diet Energy Moonlit Casava 2L Multi Jug
+- Caloric Segment: Diet
+- Category: Energy
+- Manufacturer: Swire-CC
+- Brand: Diet Moonlit
+- Package Type: 2L Multi Jug
+- Flavor: ‘Cassava’
+- Question: Swire plans to release this product for 6 months. What will the forecasted demand be, in weeks, for this product?
+
+
+```{r}
+
+merged_3 <- merged_2 # merged_2 <- read.csv("merged_2.csv") # from above
+
+# Step 1: Preprocess the data
+# Convert DATE to a Date type and extract useful features
+merged_3$DATE <- as.Date(merged_3$DATE)
+merged_3$YEAR <- year(merged_3$DATE)
+#merged_3$month <- month(merged_3$DATE)
+#merged_3$day <- day(merged_3$DATE)
+merged_3$WEEK <- week(merged_3$DATE)
+
+```
+
+## Methodology and Filtering
+
+To begin, we explored numerous methodologies to answer this question. A significant amount of our time was dedicated to machine learning models, which were largely incapable of producing a prediction due to data constraints related to the product in question. Consequently, we opted for the ARIMA method. However, we encountered several limitations with this approach as well. Below is our best attempt to navigate these issues, leveraging the available data and making informed assumptions.
+
+```{r}
+
+multi <- merged_3 |> 
+  filter(PACKAGE == "2L MULTI JUG")
+
+small <- merged_3 |> 
+  filter(PACKAGE == "16SMALL MULTI CUP")
+
+sum(small$UNIT_SALES)/sum(multi$UNIT_SALES)
+
+
+first_appearance <- merged_3 %>%
+  filter(CATEGORY == "ENERGY",
+         MANUFACTURER == "SWIRE-CC") %>%
+  group_by(ITEM, MANUFACTURER) %>%
+  summarize(first_appearance_date = min(DATE),
+            last_appearnace = max(DATE))
+
+print(first_appearance)
+
+
+
+x <- merged_3 |> 
+      filter(CATEGORY == "ENERGY") |>
+      group_by(MANUFACTURER, PACKAGE) |>
+      summarise(totalUnits = sum(UNIT_SALES))
+
+print(x, n = 50)
+
+
+```
+
+For the energy drink, we had to make certain concessions in our demand modeling. There were no historical observations of energy drinks matching the size or flavor that Swire wants to introduce, and given Swire's limited history with energy drinks, utilizing data from other manufacturers appeared inadvisable. The primary rationale was Swire's guidance that overestimation is far more costly than underestimation, and other, more established manufacturers have significantly higher demand levels. Additionally, for this, we needed to standardize demand based on package size. Our exploration into Swire's sales data for energy drinks revealed that 99% of all sales were attributable to one size: the 16SMALL MULTI CUP. Hence, we examined all market data to compare sales of the 2L Multi Jug against the 16S Multi and deduced that, on average, 1.7 cups are sold for every Jug. Consequently, we adjusted our final projection based on this ratio.
+
+```{r}
+
+# Filter data for products matching specific criteria
+similar_products <- merged_3 %>%
+  filter(CALORIC_SEGMENT == "DIET/LIGHT", 
+         CATEGORY == "ENERGY", 
+         PACKAGE == "16SMALL MULTI CUP",
+         MANUFACTURER == "SWIRE-CC") %>%
+  filter(UNIT_SALES > 0)
+
+```
+
+## ARIMA Model Development
+
+```{r}
+# Aggregate weekly sales data of similar products
+weekly_sales <- similar_products %>%
+  group_by(YEAR, WEEK, ITEM) %>%
+  summarize(total_unit_sales = sum(UNIT_SALES))
+
+weekly_sales <- weekly_sales %>%
+  group_by(YEAR, WEEK) %>%
+  summarize(total_unit_sales = mean(total_unit_sales)) %>%
+  filter(YEAR < 2022)
+
+
+# arima
+sales_ts <- ts(weekly_sales$total_unit_sales, frequency=52, start=c(2021, which(weekdays(as.Date("2020-12-05")) == "Saturday")))
+
+
+launch_period <- ifelse(time(sales_ts) >= 2021 & time(sales_ts) < 2021.5, 1, 0) 
+
+# Include the intervention in the ARIMA model using the xreg argument
+fit <- auto.arima(sales_ts, xreg = launch_period, seasonal = TRUE, D = 1, max.P = 2, max.Q = 2, max.order = 5, stepwise = FALSE, approximation = FALSE)
+
+#launch period effect only impacts the first 26 weeks
+future_launch_period <- rep(0, 26) # No launch effect in the future
+
+# Forecast with the future values of the launch period
+forecasted_sales <- forecast(fit, xreg = future_launch_period, h=26)
+
+## ***
+# Fit an ARIMA model
+#fit <- auto.arima(sales_ts)
+# Forecast the next 26 weeks (6 months)
+#forecasted_sales <- forecast(fit, h=26)
+## ***
+```
+
+
+```{r}
+# forecast plot
+plot(forecasted_sales)
+
+# Forecast values mean
+print(forecasted_sales$mean)
+
+# values & CI
+print(forecasted_sales)
+
+# Calculate in-sample fitted values
+fitted_values <- fitted(fit)
+
+# Calculate residuals 
+residuals <- sales_ts - fitted_values
+
+# Calculate RMSE
+rmse <- sqrt(mean(residuals^2, na.rm = TRUE))
+print(paste("RMSE:", rmse))
+
+
+# Total Sum of Squares
+tss <- sum((sales_ts - mean(sales_ts))^2)
+
+# Sum of Squares of Residuals
+rss <- sum(residuals^2)
+
+# R-squared
+rsq <- 1 - (rss / tss)
+print(paste("R-squared:", rsq))
+
+adjust1 <- sum(forecasted_sales$mean) / 1.7
+
+adjust2 <- adjust1*1.081
+
+adjust3 <- adjust2*1.081
+  
+predicted_demand <- round(adjust3,0)
+
+print(paste("Predicted Demand For 6 Months:",predicted_demand))
+```
+## Conclusion
+
+The remaining challenges in forecasting this product stemmed from the modeling process. Machine learning was not a feasible option, given our current proficiency and the lack of relevant predictive data. After innumerable attempts and failing to identify a contemporary algorithm for our needs, we reverted to what we felt we were best at, attempting to bridge any gaps as best we could. The modeling approach may seem odd at first glance. We are forecasting data from 2021 to estimate demand for 2024. This route was chosen to account for the significant initial surge in sales following a product launch. Subsequent to the initial orders, natural demand tends to decline substantially over time. Accordingly, we modeled the launch period of the most comparable subset of beverages available. To calculate the final demand, we incorporated the package conversion ratio, tempering the projection to what the Jug's demand would likely be, and then accounted for two years of market growth at 8.1% (cited above), in our final estimate. Ultimately, we advise conducting additional market research or surveys to refine projections based on the desired launch flavor, since Swire has not previously produced energy drinks in the flavor they plan to launch with this product.
+
+### https://finance.yahoo.com/news/united-states-energy-drink-market-223000902.html
+
+# Overall Recommendations and Future Work
+
+Both output models would benefit from having more data available to the model. With potentially limited data sources currently, the performance metrics of each new product released should be used to supplement the current data in the model and used to re-train the model for future predictions. This would effectively function as an integrated ARIMA and reinforcement-learning model, which would also provide some sensitivity towards changing market attitudes over time. 
+
+Every model has a nominal predictive value, which is what is typically reported and most used in decision making. This is a suboptimal approach when the penalty for overprediction is different from the penalty of underprediction. With a developed model, we can determine confidence intervals for a given point as well as calculating the nominal (mean) value. Assuming a normal distribution, the optimal production level for Swire can be determined to balance the risk of over- vs under-production, since the relative cost over overproduction is 4x the cost of out-of-stock (from one of Swire meetings).
+
+The UNIT_SALES over time were predicted by the models generated herein. It appears that Swire's initial business concern was about VOLUME of fluid to produce. Developing a conversion between PACKAGE and VOLUME, and integrating that with overall UNIT_SALES would allow analysts to develop a model predicting the amount of fluid sold. This would allow Swire to know and optimize how much flavor (as a physical substance) to order from Coke-Atlanta (from earlier discussion with Swire), which also provides a package-independent analysis. The PACKAGE variable could then be used to focus Swire's production on the most successful packaging types.
+
+# Appendix
+
+## Other Tested, Unused Concepts
+
+The ITEM variable contained details captured by the PACKAGE variable, which meant groupings based on ITEM were not as reduced as they could be. If modelling processed used in the future do not account for this, the aggregations may not function as intended. The models used in this analysis aggregated or filtered the data via PACKAGE, which meant that this issue was avoided. 
+
+The ITEM variable was also parsed to determine the flavor of each drink (ranging from zero to four flavors). This derived variable was initially filtered upon to use a more representative dataset, but when combining this with other filters (PACKAGE, CATEGORY), the dataset became too small to generate predictive models. CATEGORY and PACKAGE were selected as more important than flavor, but in future potential analysis where PACKAGE is integrated into a volume value for otherwise identical products, the size of the dataset may be maintained and flavor could become a predictor.
+
+In non-time series analysis looking at aggregate sales, MARKET_KEY is a highly-predictive variable. Aggregating the data across market keys significantly reduced the performance of the models. For non-ARIMA analysis, the recommendation is to include MARKET_KEY (or STATE) as a predictive factor variable, and then sum the predictions across the market keys in question to arrive at a total sales value.
+
+## Contribution
+
+- Initial model exploration: Shane, Gus, Louis, Aiden
+- Detailed model exploration: Shane, Gus
+- Write-up and proofreading: Aiden, Louis

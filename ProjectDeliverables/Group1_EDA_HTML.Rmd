@@ -1,0 +1,682 @@
+---
+title: "EDA Notebook"
+output: 
+  html_document:
+    toc: true  
+    theme: united  
+    fig_caption: true  
+    highlight: tango  
+editor_options: 
+  chunk_output_type: console
+---
+
+## Introduction
+Our business problem is to accurately forecast demand of Swire’s limited-release products, preventing both out-of-stocks and overproduction, and ensuring optimal production quantities that align with evolving consumer preferences. Achieving this goal will help Swire drive revenue growth and cost savings, expand market reach, and maintain a competitive edge in response to evolving consumer preferences and industry dynamics.
+
+## Analytics approach
+This problem is a supervised regression problem, where the target variable is units sold over a period of time as a metric for swire's demand. The questions posed by Swire vary in character, but are all based on a desire to predict volume of sales (demand) over a period of time. The EDA and modeling process will explore the data available and a variety of modeling methods to determine the most useful inputs and methods. 
+
+
+## Questions to guide exploration.
+
+> Can we make more meaning out of unit_sales if we group it by categorical data?
+
+> Can we manipulate unit_sales and dollars_sales to find overall sales and average prices for grouped data?
+
+> Will sum of overall dollar_sales be a better metric for demand and sum of unit_sales?
+
+> Will the average price drop with larger orders?
+
+> Will the average price be consistent or do we have outliers?
+
+> How should the ITEM variable in the primary dataset be parsed to be able to provide insight and predictive value in the modeling process?
+
+> How do prices change by region
+
+> How does caloric preference change by region or state. 
+
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(message=FALSE, warning=FALSE)
+```
+
+## Load libraries 
+
+```{r, message=FALSE, warning=FALSE}
+# Libraries
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, skimr, GGally, plotly, viridis, 
+               caret, DT, data.table, lightgbm, readr, e1071, 
+               ranger, parallel, mice, corrplot, ggplot2)
+library(dplyr)
+library(C50)
+library(e1071)
+library(psych)
+library(caret)
+library(rminer)
+library(rmarkdown)
+library(stringr)
+#library(tictoc) 
+library(tidyverse)
+library(matrixStats)
+library(kableExtra)
+#tic()
+
+#Data
+data <- read.csv("FACT_MARKET_DEMAND.csv")
+
+
+```
+## Random sampling for easier EDA
+> To to the large data, we will take a random sample for easier exploration, before running the complete for final results
+
+```{r}
+# no missing columns in data as a whole
+colSums(is.na(data)) 
+
+set.seed(50)
+sdf <- data
+
+```
+
+## Data overview of target variable
+> Quick look at unit sales to various categorical data
+
+```{r}
+str(sdf)
+
+
+sdf %>%
+  group_by(MARKET_KEY)%>%
+  summarise(n=sum(UNIT_SALES))%>%
+  mutate(percentage=n/sum(n))%>%
+  arrange(desc(n))
+
+
+sdf %>%
+  group_by(CALORIC_SEGMENT)%>%
+  summarise(n=sum(UNIT_SALES))%>%
+  mutate(percentage=n/sum(n))%>%
+  arrange(desc(n))
+
+sdf %>%
+  group_by(CATEGORY)%>%
+  summarise(n=sum(UNIT_SALES))%>%
+  mutate(percentage=n/sum(n))%>%
+  arrange(desc(n))
+
+sdf %>%
+  group_by(BRAND)%>%
+  summarise(n=sum(UNIT_SALES))%>%
+  mutate(percentage=n/sum(n))%>%
+  arrange(desc(n))
+
+
+sdf %>%
+  group_by(MANUFACTURER)%>%
+  summarise(n=sum(UNIT_SALES))%>%
+  mutate(percentage=n/sum(n))%>%
+  arrange(desc(n))
+
+ggplot(data = sdf,aes(UNIT_SALES))+
+  geom_histogram()
+
+
+```
+
+> Looking at the overall structure of the data, we can see that there are a lot of categorical data. Our target variable, unit_sales is a number. Interesting enough, this is not an integer.
+
+> Grouping by market key, we can see the amount of unit sales per market. This may be abstract now, but could give interesting information as we connect market_key with more familier area codes.
+
+> Regular seems to sell twice as much as Diet/Light.
+
+> SSD is the most popular category with Energy being second.
+
+> Swire-CC is one of the largest manufacturers
+
+> The histogram shows that there are some really large orders (unit sales) in the dataset that could be considered extreme values.
+
+## Discovering the average unit price
+
+> We want to discover what relationship there is between unit sales and dollar sales. Is there a decrease in the average unit price when unit sales increase. Does the average unit price have a relationship with any of the other data points? Also, we are looking for outliers and consitency in the data.
+
+```{r Unit and Dollar Sales}
+# first, lets find the average price per unit
+sum_units = sum(sdf$UNIT_SALES)
+sum_dollar = sum(sdf$DOLLAR_SALES)
+avg_price = sum_dollar/sum_units
+avg_price
+
+# average unit price is $3.42
+
+# Is the average unit price higher for smaller units?
+sales_df <- sdf %>%
+  group_by(UNIT_SALES)%>%
+  summarise(n = n(),
+            sum_sales=sum(DOLLAR_SALES))%>%
+  mutate(avg_price = sum_sales/(UNIT_SALES*n))
+
+sales_df
+
+# sales average prices ranges from 6.5 to ~2 per unit
+
+ggplot(data = sales_df,aes(UNIT_SALES, avg_price))+
+  geom_point()
+
+# There are some outliers for average price
+
+# lets look at avg_price over 7 for outliers:
+
+filtered_df <- sales_df %>% filter(avg_price > 7)%>% arrange(desc(avg_price))
+filtered_df
+
+# It looks like most of the unit sales with average prices over 7 are special orders (just one quantity of the exact unit sales)
+
+# There are some sales that are not whole numbers, but are very small in quantity. This could be a typo or just an error
+
+# it seems to be random, so imputing may not be reasonable
+# we also do not want any imputation into a target variable
+# lets look closer into the larger unit pices
+sdf$AVG_PRICE <- sdf$DOLLAR_SALES / sdf$UNIT_SALES
+
+## commented due to length
+#sdf%>%filter(AVG_PRICE > 20) %>% arrange(AVG_PRICE)
+
+
+# it looks like package for each unit is typically 12SMALL 24ONE CUP and ENERGY Category, which may indicate that the unit price actually is not that far off
+
+# lets group data for each of the segments
+
+category_df <- sdf %>%
+  group_by(CATEGORY)%>%
+  summarise(n = n(),
+            avg_sales=mean(AVG_PRICE))
+
+category_df 
+# ENERGY has higher avg sales than the other categories
+
+# look into package relationships to average salesprice
+package_df <- sdf %>%
+  group_by(PACKAGE)%>%
+  summarise(n = n(),
+            avg_sales=mean(AVG_PRICE))%>%
+  arrange(desc(avg_sales))
+
+## commenting due to length
+#package_df
+
+# there is definitely a reltaionship
+# lets look at the boxplots for top 3
+
+package_top <- sdf %>% filter(PACKAGE %in% c('8SMALL 24ONE CUP', '16SMALL 24ONE CUP', '12SMALL 24ONE PLASTICS JUG'))
+## commenting due to length
+
+#package_top
+
+ggplot(data = package_top,aes(x = PACKAGE, y = AVG_PRICE))+
+  geom_boxplot()+
+    theme_minimal() +
+  labs(title = "Boxplot of Average price for top 3 Package categories",
+       x = "Package",
+       y = "Average price")
+
+
+```
+ 
+> The results from exploring the average unit price gives us some interesting information. 
+
+> We can see how the average unit price depends mostly on the quantity of the order, but also on the packaging. It also seems that the energy soda is more expensive than other types.There are also some outliers, that most likely are extremes and not errors. We do not want to impute, but rather observe these outliers to accurately predict. 
+
+# Making units to integers
+> Due to many rows of unit_sales having fractions of numbers, where the average unit price gets very high, we have decided to filter data to only include rows where unit_sales are integers
+
+```{r}
+
+sdf_filter <- sdf[sdf$UNIT_SALES %% 1 == 0,]
+min(sdf$UNIT_SALES) # lowest is a fraction lower than 0
+min(sdf_filter$UNIT_SALES) # lowest is 0
+```
+
+
+
+# Geographical data
+
+```{r}
+market_data <- read_csv("zip_to_market_unit_mapping.csv")
+consumer_demographics <- read_csv("demo_data.csv")
+
+```
+
+## join market key
+```{r}
+# Load necessary libraries
+library(dplyr)
+
+# Renaming the ZIP_CODE column in zip_to_market to match the Zip column in demo_data
+market_data <- rename(market_data, Zip = ZIP_CODE)
+
+# Join the datasets based on Zip code
+joined_data <- left_join(consumer_demographics, market_data, by = "Zip")
+
+# View the first few rows of the joined dataset
+head(joined_data)
+
+
+```
+
+## Adding regions to joined_data
+
+```{r}
+# Define the mappings of state abbreviations to regions
+northern_states <- c("ME", "NH", "VT", "MA", "RI", "CT", "NY", "NJ", "PA", 
+                     "OH", "MI", "IN", "WI", "IL", "MN", "IA", "MO", "ND", 
+                     "SD", "NE", "KS")
+southern_states <- c("MD", "DE", "WV", "VA", "KY", "NC", "SC", "TN", "GA", 
+                     "AL", "MS", "AR", "LA", "FL", "TX", "OK")
+
+southwest_states <- c("AZ", "NM", "NV")
+
+# Function to determine the region based on state abbreviation
+get_region <- function(state_abbr) {
+  if (state_abbr %in% northern_states) {
+    return("Northern")
+  } else if (state_abbr %in% southern_states) {
+    return("Southern")
+  } else if (state_abbr %in% southwest_states) {
+    return("Southwest")
+  } else {
+    return("Western") # Defaulting to Western for states not included in the other lists
+  }
+}
+
+# Apply the function to the demo_data to create a new 'Region' column
+joined_data$Region <- sapply(joined_data$State, get_region) 
+
+# Check the first few rows to verify
+summary(joined_data)
+
+joined_data |> 
+  group_by(Region) |>
+  summarize(Count = sum(Count))
+
+
+```
+
+Western had the highest number of people, followed by the Southwest, then Northern region. 
+
+## Adding region to dataset
+
+```{r}
+
+library(dplyr)
+
+# Ensure joined_data has unique MARKET_KEY values
+joined_data_unique <- joined_data %>%
+  distinct(MARKET_KEY, .keep_all = TRUE)
+
+# Perform a left join to add Region to sdf
+merged_data <- sdf %>%
+  left_join(joined_data_unique[, c("MARKET_KEY", "Region")], by = "MARKET_KEY")
+
+
+```
+
+## Calculate the average price for each market key
+
+```{r}
+# Calculate the average price for each market key
+avg_price_by_market <- sdf %>%
+  group_by(MARKET_KEY) %>%
+  summarize(Avg_Price = mean(AVG_PRICE, na.rm = TRUE))
+
+# Display the table
+print(avg_price_by_market)
+
+
+```
+
+## Top 10
+
+```{r}
+# Calculate the average price for each market key and get the top 10
+top_avg_price_by_market <- sdf %>%
+  group_by(MARKET_KEY) %>%
+  summarize(Avg_Price = mean(AVG_PRICE, na.rm = TRUE)) %>%
+  arrange(desc(Avg_Price)) %>%
+  slice_head(n = 10) 
+
+# Display the table of top 10
+print(top_avg_price_by_market)
+
+# Create a plot of average price for the top 10 market keys
+ggplot(top_avg_price_by_market, aes(x = reorder(MARKET_KEY, Avg_Price), y = Avg_Price)) +
+  geom_col() +
+  theme_minimal() +
+  labs(x = "Market Key", y = "Average Price", title = "Top 10 Market Keys by Average Price") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+
+```
+Not much variation in price by market key
+
+## Average Price By Region
+
+```{r}
+avg_price_per_region <- merged_data %>%
+  group_by(Region) %>%
+  summarise(Total_Dollar_Sales = sum(DOLLAR_SALES, na.rm = TRUE),
+            Total_Unit_Sales = sum(UNIT_SALES, na.rm = TRUE),
+            Avg_Price = Total_Dollar_Sales / Total_Unit_Sales)
+
+print(avg_price_per_region)
+
+# Plot the average price per region
+ggplot(avg_price_per_region, aes(x = reorder(Region, -Avg_Price), y = Avg_Price)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  theme_minimal() +
+  labs(x = "Region", y = "Average Price", title = "Average Price by Region") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+Average price was highest in the Northern region. 
+
+
+## Formatting date for time series graphs
+
+```{r}
+
+merged_2 <- merged_data
+
+merged_2$DATE <- as.Date(merged_2$DATE, format = "%Y-%m-%d")
+
+str(merged_2)
+
+
+```
+
+
+## Time series graphs
+```{r}
+
+library(scales) 
+sales_by_region_time <- merged_2 %>%
+  group_by(Region, DATE) %>%
+  summarise(Total_Dollar_Sales = sum(DOLLAR_SALES, na.rm = TRUE)) %>%
+  arrange(Region, DATE)
+
+ggplot(sales_by_region_time, aes(x = DATE, y = Total_Dollar_Sales, group = Region, color = Region)) +
+  geom_line() +
+  labs(title = "Sales Over Time by Region",
+       x = "Date",
+       y = "Total Dollar Sales") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1") +
+  scale_y_continuous(labels = label_comma())
+  theme(legend.title = element_blank())
+
+sales_by_region_time <- merged_2 %>%
+  filter(Region != "Western") %>%
+  group_by(Region, DATE) %>%
+  summarise(Total_Dollar_Sales = sum(DOLLAR_SALES, na.rm = TRUE)) %>%
+  arrange(Region, DATE)
+
+ggplot(sales_by_region_time, aes(x = DATE, y = Total_Dollar_Sales, group = Region, color = Region)) +
+  geom_line() +
+  labs(title = "Sales Over Time by Region",
+       x = "Date",
+       y = "Total Dollar Sales") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1") +
+  scale_y_continuous(labels = label_comma())
+  theme(legend.title = element_blank())
+
+
+```
+Even though the southwest has almost double the population, the region sales for that area are not proportionally higher than the northern region, suggesting the northern customers may be more valuable. We can further that assessment using the above graph, showing that average price is also higher in the Northern region. 
+
+## Caloric Segments by Region
+```{r}
+caloric_segment_count <- merged_2 %>%
+  group_by(Region, CALORIC_SEGMENT) %>%
+  summarise(Count = n(), .groups = 'drop')
+
+# Check the counts
+print(caloric_segment_count)
+
+# Create a bar plot for count of Caloric_Segment by Region
+ggplot(caloric_segment_count, aes(x = Region, y = Count, fill = CALORIC_SEGMENT)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(title = "Count of Caloric Segment by Region",
+       x = "Region",
+       y = "Count") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+
+```
+
+There wasn't a large difference in diet verse regular consumption, which we found to be surprising. We believe that regular would be higher than diet by a considerable amount. 
+
+## ITEM Variable
+
+```{}
+
+#Commented out to avoid unnecessary repetition
+# necessary files:
+  # dollarSales.rda
+  # item.rda
+  # wordList.csv
+
+#data1 <- data[c("DOLLAR_SALES")]
+#save(data1, file='dollarSales.rda')
+#a <- data$ITEM
+#save(a, file='item.rda')
+
+#d <- data.frame(d = str(""))
+#for (ii in 1:length(a)) {
+#  tmp <- strsplit(a[ii], split = " ")
+#  d[(nrow(d)+1):(nrow(d)+length(tmp[[1]])),1] <- tmp[[1]]
+#  d<-distinct(d)
+#}
+#colnames(d) <- c("d")
+#write.csv(d, "wordList.csv")
+
+# intermediate step here
+# manually went through wordList and selected likely-important words
+
+# return one-Hot encoding for occurrence of a word in an ITEM description
+# done in two parts due to computer memory limits
+for (grp in c(1,2)) {
+  data1 <- data[c("ITEM")]
+  nC <- ncol(data1)
+  data1b <- data1 %>% select(-c('ITEM'))
+  
+  if (grp==1) {
+    idxS <- 1
+    idxE <- 87
+    filName <- 'oneHot1.rda'
+  } else {
+    idxS <- 88
+    idxE <- 136 #length of d
+    filName <- 'oneHot2.rda'
+  }
+  d <- read.csv('wordList.csv')
+  d <- d[c(1:108,110:136,109),"d"] 
+  # sorted because red wasn't added until the end
+  # still need this because the removal done later is by column number
+  
+  d <- d[idxS:idxE]
+  
+  for (ii in 1:length(d)) {
+    data1b[grep(d[[ii]], data1$ITEM),ii] <- 1
+  }
+  rm(data1)
+  colnames(data1b) <- d
+  
+  for (ii in 1:ncol(data1b)) {
+    data1b[is.na(data1b[,ii]),ii] <- 0
+  }
+  
+  save(data1b, file=filName)
+  
+  # load dataset, and merge similar values
+  # remove outdated variables, and those without enough occurrences
+  # rename columns to the wordList
+  
+  rm(data1b)
+  
+  load(file=filName)
+  colnames(data1b) <- d
+  
+  if (grp==1) {
+    data1b$COFFEE <- min(data1b$COFFEE+data1b$COFFEA,1)
+    data1b$ENERGY <- min(data1b$ENERGY+data1b$ENRGY,1)
+    data1b$KULA <- min(data1b$KULA+data1b$KOLA,1)
+    data1b<-data1b[,c(1:31,33:53,55:73,75:87)]
+    
+    data1b<-data1b[,-c(10,14,20,34:36,46,48:50,59,75,80)]
+    
+  } else {
+    data1 <- as.data.frame(data$ITEM)
+    colnames(data1) <- c("ITEM")
+    
+    data1$ITEM <- gsub("UNFLAVORED","",data1$ITEM) # to get RED summary
+    data1b[grep("RED", data1$ITEM),49] <- 1
+    
+    data1$ITEM <- gsub("MIXED-TROPPY","",data1$ITEM) # to get TROPPY summary
+    data1b["TROPPY"] <- 0
+    data1b[grep("TROPPY", data1$ITEM),40] <- 1
+    data1b$TROPPY <- min(data1b$TROPPY+data1b$TROPICAL,1)
+    data1b$RED <- min(data1b$RED+data1b$ROJO,1)
+    data1b$SANGRIA <- min(data1b$SANGRIA+data1b$SANGRITA,1)
+    
+    data1b<-data1b[,c(1:21,23:28,30:38,40:49)]
+    
+    data1$ITEM <- gsub("RAZZBERRY","",data1$ITEM) # to get RAZZ summary
+    data1b["RAZZ"] <- 0
+    data1b[grep("RAZZ", data1$ITEM),20] <- 1
+    
+    data1$ITEM <- gsub("RAZZ","",data1$ITEM) # to get RAZZ summary
+    data1b["RAZ"] <- 0
+    data1b[grep("RAZ", data1$ITEM),19] <- 1
+    
+    data1b<-data1b[,c(1:11,13:15,17:22,24:30,32:46)]
+  }
+  save(data1b, file=filName)
+  rm(data1b)
+}
+
+
+```
+
+The ITEM variable was parsed across the dataset to determine the unique words contained (n=887). After removing numbers, stopwords, and combining similar words (e.g. RED and ROJO), the most likely predictive terms (n=136) were retained for further processing. In a method similar to one-hot encoding, each of the unique reduced word list was added as an integer variable (0 or 1), on a per-row basis to identify if that word occurred in the ITEM variable.
+
+
+``` {}
+
+# load dollarSales data and all oneHot terms, reduce rows, and fit model
+#   commented out: validation of column names vs oneHot counts
+
+load(file='dollarSales.rda')
+
+set.seed(73)
+nR <- 30000
+idx <- sample(nrow(data1), nR)
+
+data2 <- data.frame(matrix(double(), nrow = nR, ncol = 1))
+colnames(data2) <-c("DOLLAR_SALES")
+data2$DOLLAR_SALES <- data1[idx,1]
+rm(data1)
+gc()
+
+load(file='oneHot1.rda')
+data1b<-data1b[idx,]
+data2 <- cbind(data2,data1b)
+rm(data1b)
+gc()
+
+load(file='oneHot2.rda')
+data1b<-data1b[idx,]
+data2 <- cbind(data2,data1b)
+rm(data1b)
+gc()
+
+cNs <- colnames(data2[,2:ncol(data2)])
+data2[,cNs] <- lapply(data2[,cNs] , factor)
+
+idx2 <- double()
+for (ii in 2:ncol(data2)) {
+  ln <- length(unique(data2[,ii]))
+  if (ln<2) {
+    idx2 <- c(idx2,ii)
+  }
+}
+data2 <- data2[,-idx2]
+
+#m1 <- glm(DOLLAR_SALES ~ ., data=data2)
+#print(summary(m1))
+
+data3 <- data.frame(matrix(double(), nrow = ncol(data2), ncol = 1))
+rownames(data3) <- colnames(data2)
+colnames(data3) <- c("cnt")
+for (ii in 1:ncol(data2)) {
+  if (ii==1) {
+    data3[ii,1] <- nrow(data2)
+  } else {
+    t <- table(data2[,ii])
+    data3[ii,1] <- t[2]
+  }
+}
+
+data3$cnt <- data3$cnt/data3$cnt[1]
+data3 <- data3 %>% arrange(-cnt)
+data3 <- data3[2:nrow(data3),,drop=F]
+
+nR2 <- 40
+nR2b <- floor(nR2/2)
+data4 <- data3[1:nR2,,drop=F]
+data4$idx <- 1:nrow(data4)
+rNs <- rownames(data4)
+ggplot(data4[1:nR2b,], aes(x=idx,y = cnt*100)) +
+  geom_col(col = "black",fill="black") +
+  geom_text(aes(label = rNs[1:nR2b]), hjust = -0.1, size=3,color="red", angle=90) +
+  xlab("WORDS") + ylab("Percentage") + ylim(0,30) + ggtitle("Frequent Words: Part 1")
+
+ggplot(data4[(nR2b+1):nR2,], aes(x=idx,y = cnt*100)) +
+  geom_col(col = "black",fill="black") +
+  geom_text(aes(label = rNs[(nR2b+1):nR2]), hjust = -0.1, size=3,color="red", angle=90) +
+  xlab("WORDS") + ylab("Percentage") + ylim(0,30) + ggtitle("Frequent Words: Part 2")
+
+```
+
+This dataset was merged with the DOLLAR_SALES column and a generalized linear model fit against all the WORDS to get an initial understanding of the predictive power available. A partial summary of this model is provided below. This preliminary result implies that some of the words in the derived dataset will be useful in predicting product sales.
+
+## Summary
+
+The EDA focusing on the geographical aspects of the dataset gave us insights into the sales and consumer behavior across different regions. Here's a summary of the key findings:
+
+1) Population Distribution: The Western region has the largest population, followed by the Southwest, with the Northern region having the smallest population among the three. This demographic information sets the stage for understanding the market potential in each region.
+
+2) Price Variation by Market Key: The analysis indicates that there is not much variation in the price of products when segmented by market keys across different regions. This suggests that pricing strategies might be consistent across regions or that market keys do not significantly influence pricing variations.
+
+3) Regional Price Differences: Despite the overall consistency in pricing, the Northern region has the highest average price for products. This could be indicative of different consumer preferences, higher willingness to pay, or a different mix of products being more popular in the Northern region compared to others.
+
+4) Sales vs. Population Size: The sales volume in the Southwest, despite having almost double the population of the Northern region, does not have proportionally higher sales. This suggests that customers in the Northern region might be more valuable.
+
+5) Consumption Patterns of Diet vs. Regular Products: There wasn't a significant difference in the consumption patterns between diet and regular versions of products. This was surprising, as it was expected that regular variants would greatly outpace diet. This finding could reflect broader consumer trends towards healthier lifestyles or suggest that diet products have gained notable (and possibly changing) acceptance among the population.
+
+The higher average price and relatively strong sales in the Northern region, despite its smaller population, highlight an opportunity to focus on high-value customers and premium product offerings in this area. Meanwhile, the widespread acceptance of both diet and regular products suggests that there is a broad market for various product types, and strategies should not necessarily favor one over the other without further market research. These geographical insights, combined with further analysis of seasonal trends, can help in crafting more more accurate forecasts for Swire. 
+
+With respect to the parsing of the ITEM variable: the charts generated show the percentage of occurrences of the 40 most common terms in ITEM. Additional effort prior to modeling could include performing a more detailed text analysis to identify the words that are too unique to be generalizable or too frequent to provide good predictive power. During the modeling effort, words will be included as predictors incrementally to more confidently understand predictive power and statistical significance. The preliminary model fit indicates that some words may be related to the target variable(s) of this dataset.
+
+
+## Notes & Group Member Contribution
+
+Did not run lines 467 - 653 due to hour long render time. 
+
+### Gustav's part was the code before line 244. Shane's was 244 - 466. Aiden's code was 467 - 653. I left Aiden's comments about his output, as they reflect his analysis of the code I could not run. Louis helped on the writeups, all parts via discussion and was the primary contributor on the previous assignment. 
