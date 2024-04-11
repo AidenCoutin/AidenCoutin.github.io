@@ -1,7 +1,8 @@
 # Summary
 This folder contains all of the documentation/deliverables for the U-of-U's MSBA Capstone Group 1 work.
 
-[Business Problem Statement](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/Business Problem Statement_Capstone.docx)
+Business Problem Statement
+1. [Here](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/Business Problem Statement_Capstone.docx)
 
 EDA:
 1. [Raw EDA file](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/Group1_EDA_HTML.Rmd)
@@ -13,7 +14,8 @@ Modelling:
 1. [Raw file](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/Group1_FinalModel_r3.Rmd)
 2. [Knit file](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/Group1_FinalModel_r3.html)
 
-[Presentation](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/Group1_Final Presentation.pdf)
+Presentation
+1. [Here](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/Group1_Final Presentation.pdf)
 
 Other Files
 1. dsa
