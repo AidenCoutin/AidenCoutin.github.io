@@ -18,9 +18,8 @@ Presentation
 1. [Here](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/Group1_Final%20Presentation.pdf)
 
 Other Files
-1. dsa
-2. dsa
-3. das
-
+1. [Flavor Derivation](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/EDA_ITEM.Rmd)
+2. [Remove Package from ITEM](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/snippet_1.R)
+3. [Optimal Production Calculation](https://github.com/AidenCoutin/AidenCoutin.github.io/tree/main/ProjectDeliverables/OptimalProduction.Rmd)
 
 
